@@ -1,0 +1,106 @@
+[
+  {
+    "name": "Basic Digital Marketing",
+    "duration": "2 Months",
+    "original_fee": 30000,
+    "discounted_fee": 25000,
+    "ideal_for": "Beginners & Students",
+    "syllabus": [
+      "Social Media Marketing",
+      "Basics of Google & Meta Ads",
+      "Content Strategy",
+      "SEO Fundamentals",
+      "Reporting & Analytics"
+    ],
+    "includes": []
+  },
+  {
+    "name": "Advanced Digital Marketing",
+    "duration": "3 Months",
+    "original_fee": 50000,
+    "discounted_fee": 45000,
+    "ideal_for": "Intermediate learners aiming for job-ready skills",
+    "syllabus": [
+      "Paid Ads (Meta, Google)",
+      "Performance Marketing",
+      "Website Audit",
+      "SEO (On-page & Off-page)",
+      "Google Ads – Search, Display, and Video"
+    ],
+    "includes": ["Internship + Job Placement Assistance"]
+  },
+  {
+    "name": "Digital Marketing with AI",
+    "duration": "3.5 - 4 Months",
+    "original_fee": 60000,
+    "discounted_fee": 50000,
+    "ideal_for": "Marketers, Freelancers & Career Professionals",
+    "syllabus": [
+      "Everything in Advanced Course",
+      "AI Tools for Marketing Automation (ChatGPT, Jasper, Canva AI, Copy.ai, Deepseek, Gemini, Perplexity AI)",
+      "AI-Driven Ad Optimization",
+      "Smart Campaign Planning"
+    ],
+    "includes": ["Internship + Job Placement Assistance"]
+  },
+  {
+    "name": "Video Editing (Professional Course)",
+    "duration": "3 - 4 Months",
+    "original_fee": 50000,
+    "discounted_fee": 45000,
+    "ideal_for": "Aspiring Editors, Content Creators, Filmmakers, YouTubers",
+    "syllabus": [
+      "Professional Video Editing Course",
+      "Adobe Premiere Pro",
+      "Adobe After Effects",
+      "CapCut & VN for Mobile Editing",
+      "Color Grading Techniques",
+      "Reels Editing for Instagram & YouTube Shorts",
+      "Sound Design & Background Score Sync",
+      "Export Settings for Different Platforms",
+      "Creative Storytelling Techniques"
+    ],
+    "includes": ["Internship + Job Placement Assistance"]
+  },
+  {
+    "name": "Graphic Designing (Professional Graphic Course)",
+    "duration": "3 - 4 Months",
+    "original_fee": 50000,
+    "discounted_fee": 45000,
+    "ideal_for": "Creative Individuals, Students, Freelancers, Business Owners",
+    "syllabus": [
+      "Adobe Photoshop",
+      "Adobe Illustrator",
+      "Adobe InDesign",
+      "Canva Pro for Quick & Creative Design",
+      "Typography & Color Theory",
+      "Branding & Logo Design",
+      "Social Media Creatives",
+      "Poster & Banner Design",
+      "Print Media (Brochures, Flyers, Business Cards)",
+      "UI/UX Basics (Figma & Adobe XD Overview)",
+      "Portfolio Development"
+    ],
+    "includes": ["Internship + Job Placement Assistance"]
+  },
+  {
+    "name": "Web Development (Full Stack Web Development Course)",
+    "duration": "3 - 4 Months",
+    "original_fee": 50000,
+    "discounted_fee": 45000,
+    "ideal_for": "Beginners to Intermediate Developers, Freelancers, Job Seekers",
+    "syllabus": [
+      "HTML5, CSS3, JavaScript",
+      "Bootstrap & Tailwind CSS",
+      "React.js / Angular Basics",
+      "Node.js & Express.js",
+      "MySQL",
+      "RESTful APIs Integration",
+      "Responsive Website Design",
+      "Website Deployment (GitHub, Netlify, cPanel)",
+      "Domain, Hosting & CMS (WordPress Overview)",
+      "Real-World Projects & Portfolio Building"
+    ],
+    "includes": ["Internship + Job Placement Assistance"]
+  }
+]

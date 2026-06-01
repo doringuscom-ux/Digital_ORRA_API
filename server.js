@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
@@ -22,9 +24,33 @@ const sessions = {}; // In-memory session store to maintain conversation history
 if (GEMINI_API_KEY && GEMINI_API_KEY !== 'your_google_gemini_api_key_here') {
   console.log('Initializing Gemini AI engine with custom system instruction...');
   genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+  
+  // Construct dynamic system instruction using courses.json if available
+  let systemInstruction = process.env.SYSTEM_INSTRUCTION || '';
+  try {
+    const coursesPath = path.join(__dirname, 'courses.json');
+    if (fs.existsSync(coursesPath)) {
+      const coursesData = JSON.parse(fs.readFileSync(coursesPath, 'utf8'));
+      let coursesText = '\n\nHere are the detailed courses we offer at Digital ORRA Training Academy:\n';
+      coursesData.forEach(course => {
+        coursesText += `- **Course Name**: ${course.name}\n`;
+        coursesText += `  - **Duration**: ${course.duration}\n`;
+        coursesText += `  - **Program Fees**: Original fee ₹${course.original_fee}, Discounted fee ₹${course.discounted_fee}\n`;
+        coursesText += `  - **Ideal For**: ${course.ideal_for}\n`;
+        if (course.includes && course.includes.length > 0) {
+          coursesText += `  - **Includes**: ${course.includes.join(', ')}\n`;
+        }
+        coursesText += `  - **Syllabus/Topics**: ${course.syllabus.join(', ')}\n`;
+      });
+      systemInstruction += coursesText;
+    }
+  } catch (error) {
+    console.error('Error loading courses.json for system instruction:', error.message);
+  }
+
   aiModel = genAI.getGenerativeModel({ 
     model: 'gemini-2.5-flash',
-    systemInstruction: process.env.SYSTEM_INSTRUCTION
+    systemInstruction: systemInstruction
   });
 } else {
   console.warn('\n⚠️ WARNING: GEMINI_API_KEY is not set in .env. The chatbot will use fallback messages instead of AI replies. Get a free key at https://aistudio.google.com/\n');
