@@ -4,7 +4,6 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(bodyParser.json());
@@ -14,43 +13,36 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const META_API_VERSION = process.env.META_API_VERSION || 'v25.0';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free';
 
-// Initialize Gemini AI SDK if API Key is configured
-let genAI;
-let aiModel;
+let systemInstruction = '';
+// Construct dynamic system instruction using courses.json if available
+try {
+  const coursesData = require('./courses.json');
+  let coursesText = '\n\nHere are the detailed courses we offer at Digital ORRA Training Academy:\n';
+  coursesData.forEach(course => {
+    coursesText += `- **Course Name**: ${course.name}\n`;
+    coursesText += `  - **Duration**: ${course.duration}\n`;
+    coursesText += `  - **Program Fees**: Original fee ₹${course.original_fee}, Discounted fee ₹${course.discounted_fee}\n`;
+    coursesText += `  - **Ideal For**: ${course.ideal_for}\n`;
+    if (course.includes && course.includes.length > 0) {
+      coursesText += `  - **Includes**: ${course.includes.join(', ')}\n`;
+    }
+    coursesText += `  - **Syllabus/Topics**: ${course.syllabus.join(', ')}\n`;
+  });
+  systemInstruction = (process.env.SYSTEM_INSTRUCTION || '') + coursesText;
+} catch (error) {
+  console.error('Error loading courses.json for system instruction:', error.message);
+  systemInstruction = process.env.SYSTEM_INSTRUCTION || '';
+}
+
 const sessions = {}; // In-memory session store to maintain conversation history per user
 
-if (GEMINI_API_KEY && GEMINI_API_KEY !== 'your_google_gemini_api_key_here') {
-  console.log('Initializing Gemini AI engine with custom system instruction...');
-  genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  
-  // Construct dynamic system instruction using courses.json if available
-  let systemInstruction = process.env.SYSTEM_INSTRUCTION || '';
-  try {
-    const coursesData = require('./courses.json');
-    let coursesText = '\n\nHere are the detailed courses we offer at Digital ORRA Training Academy:\n';
-    coursesData.forEach(course => {
-      coursesText += `- **Course Name**: ${course.name}\n`;
-      coursesText += `  - **Duration**: ${course.duration}\n`;
-      coursesText += `  - **Program Fees**: Original fee ₹${course.original_fee}, Discounted fee ₹${course.discounted_fee}\n`;
-      coursesText += `  - **Ideal For**: ${course.ideal_for}\n`;
-      if (course.includes && course.includes.length > 0) {
-        coursesText += `  - **Includes**: ${course.includes.join(', ')}\n`;
-      }
-      coursesText += `  - **Syllabus/Topics**: ${course.syllabus.join(', ')}\n`;
-    });
-    systemInstruction += coursesText;
-  } catch (error) {
-    console.error('Error loading courses.json for system instruction:', error.message);
-  }
-
-  aiModel = genAI.getGenerativeModel({ 
-    model: 'gemini-2.5-flash',
-    systemInstruction: systemInstruction
-  });
+if (OPENROUTER_API_KEY && OPENROUTER_API_KEY !== 'your_openrouter_api_key_here') {
+  console.log(`Initializing OpenRouter AI engine with model: ${OPENROUTER_MODEL}`);
 } else {
-  console.warn('\n⚠️ WARNING: GEMINI_API_KEY is not set in .env. The chatbot will use fallback messages instead of AI replies. Get a free key at https://aistudio.google.com/\n');
+  console.warn('\n⚠️ WARNING: OPENROUTER_API_KEY is not set in .env. The chatbot will use fallback messages instead of AI replies.\n');
 }
 
 // Root Route
@@ -115,9 +107,9 @@ app.post('/webhook', async (req, res) => {
             const textBody = message.text.body;
             console.log(`Message content: "${textBody}"`);
 
-            // --- Gemini AI Auto-Reply with Conversational Memory ---
-            console.log('Generating automated response using Gemini AI with session memory...');
-            const aiReply = await generateGeminiSessionReply(from, textBody);
+            // --- OpenRouter AI Auto-Reply with Conversational Memory ---
+            console.log('Generating automated response using OpenRouter AI with session memory...');
+            const aiReply = await generateAISessionReply(from, textBody);
             console.log(`Generated Response: "${aiReply}"`);
 
             try {
@@ -199,29 +191,58 @@ async function sendWhatsAppTextMessage(to, text) {
 }
 
 /**
- * Helper function to generate response using Google Gemini AI with session memory
+ * Helper function to generate response using OpenRouter AI with session memory
  */
-async function generateGeminiSessionReply(userId, userMessage) {
-  if (!aiModel) {
-    console.log('Gemini model not initialized. Using fallback response.');
+async function generateAISessionReply(userId, userMessage) {
+  if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === 'your_openrouter_api_key_here') {
+    console.log('OpenRouter key not configured. Using fallback response.');
     return "Thank you for contacting Digital ORRA. Our AI Assistant is undergoing setup. Please leave your requirement details and a team member will reach out to you shortly!";
   }
-  
-  try {
-    // If no active session exists for this user, start a new chat session
-    if (!sessions[userId]) {
-      console.log(`Creating new chat session memory for user: ${userId}`);
-      sessions[userId] = aiModel.startChat({
-        history: []
-      });
-    }
 
-    const chatSession = sessions[userId];
-    const result = await chatSession.sendMessage(userMessage);
-    const response = await result.response;
-    return response.text().trim();
+  // Initialize session history if it doesn't exist
+  if (!sessions[userId]) {
+    console.log(`Creating new chat session memory for user: ${userId}`);
+    sessions[userId] = [
+      { role: 'system', content: systemInstruction }
+    ];
+  }
+
+  // Add user message
+  sessions[userId].push({ role: 'user', content: userMessage });
+
+  // Keep last 20 messages + system instruction to avoid token limits
+  if (sessions[userId].length > 21) {
+    sessions[userId] = [
+      sessions[userId][0],
+      ...sessions[userId].slice(sessions[userId].length - 20)
+    ];
+  }
+
+  try {
+    const url = 'https://openrouter.ai/api/v1/chat/completions';
+    const payload = {
+      model: OPENROUTER_MODEL,
+      messages: sessions[userId]
+    };
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'HTTP-Referer': 'https://digital-orra-api.vercel.app',
+      'X-Title': 'Digital ORRA WhatsApp Bot'
+    };
+
+    const response = await axios.post(url, payload, { headers });
+    
+    if (response.data && response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
+      const aiReply = response.data.choices[0].message.content.trim();
+      sessions[userId].push({ role: 'assistant', content: aiReply });
+      return aiReply;
+    } else {
+      console.error('Unexpected OpenRouter response structure:', JSON.stringify(response.data));
+      return "Thank you for your message. We will get back to you shortly!";
+    }
   } catch (error) {
-    console.error(`Error calling Gemini API for session ${userId}:`, error.message);
+    console.error(`Error calling OpenRouter API for session ${userId}:`, error.response ? error.response.data : error.message);
     return "Thank you for your message. We will get back to you shortly!";
   }
 }
