@@ -209,3 +209,6 @@ app.listen(PORT, () => {
   console.log(`Webhook URL for Meta Dashboard: http://<your-public-url>/webhook`);
   console.log(`Verify Token is: ${VERIFY_TOKEN}`);
 });
+
+module.exports = app;
+
