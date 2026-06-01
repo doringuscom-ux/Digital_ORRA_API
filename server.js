@@ -46,7 +46,7 @@ if (GEMINI_API_KEY && GEMINI_API_KEY !== 'your_google_gemini_api_key_here') {
   }
 
   aiModel = genAI.getGenerativeModel({ 
-    model: 'gemini-2.5-flash-lite',
+    model: 'gemini-2.5-flash',
     systemInstruction: systemInstruction
   });
 } else {
