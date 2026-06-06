@@ -20,19 +20,16 @@ let systemInstruction = '';
 // Construct dynamic system instruction using courses.json if available
 try {
   const coursesData = require('./courses.json');
-  let coursesText = '\n\nHere are the detailed courses we offer at Digital ORRA Training Academy:\n';
-  coursesData.forEach(course => {
-    coursesText += `- **Course Name**: ${course.name}\n`;
-    coursesText += `  - **Duration**: ${course.duration}\n`;
-    coursesText += `  - **Program Fees**: Original fee ₹${course.original_fee}, Discounted fee ₹${course.discounted_fee}\n`;
-    coursesText += `  - **Ideal For**: ${course.ideal_for}\n`;
+  let coursesText = '\n\nCourses Offered & Syllabi:\n';
+  coursesData.forEach((course, index) => {
+    coursesText += `${index + 1}. **${course.name}** (${course.duration})\n`;
+    coursesText += `   - Syllabus: ${course.syllabus.join(', ')}\n`;
     if (course.includes && course.includes.length > 0) {
-      coursesText += `  - **Includes**: ${course.includes.join(', ')}\n`;
+      coursesText += `   - Includes: ${course.includes.join(', ')}\n`;
     }
-    coursesText += `  - **Syllabus/Topics**: ${course.syllabus.join(', ')}\n`;
   });
 
-  let servicesText = `\n\nHere are the Services we offer:\n` +
+  let servicesText = `\n\nServices Offered:\n` +
     `- Google Ads\n` +
     `- Meta Ads (Facebook & Instagram)\n` +
     `- SEO\n` +
@@ -41,7 +38,42 @@ try {
     `- Graphic Designing\n` +
     `- Video Editing\n`;
 
-  systemInstruction = (process.env.SYSTEM_INSTRUCTION || '') + servicesText + coursesText;
+  const flowInstructions = `
+You are a friendly, natural, and polite AI assistant representing Digital ORRA (Panchkula).
+Your tone must be warm, helpful, and natural—just like a friendly WhatsApp conversation. Converse comfortably in Hinglish and English (use mixed Hinglish-English naturally, e.g. "Haan ji, bilkul! Hamare paas web development course hai..."). Keep your replies conversational, short, and to the point.
+
+GUIDELINES FOR CONVERSATION FLOW:
+1. **Welcome & Interest Check**:
+   If the user starts the chat (says hi, hello, start, etc.), welcome them with:
+   "👋 Welcome to Digital ORRA Academy! We offer industry-focused training with practical learning, live projects, internship opportunities, and placement assistance.
+   Are you interested in:
+   - Digital Marketing Services
+   - Digital Marketing Courses"
+   
+2. **Services**:
+   If they want services, list the "Services Offered". Conclude by informing them that our business team will contact them shortly with details.
+   
+3. **Courses**:
+   If they want courses, list the "Courses Offered" with numbers 1️⃣ to 6️⃣:
+   1️⃣ Basic Digital Marketing (2 Months)
+   2️⃣ Advanced Digital Marketing (3 Months)
+   3️⃣ Digital Marketing with AI (3.5–4 Months)
+   4️⃣ Graphic Designing
+   5️⃣ Video Editing
+   6️⃣ Full Stack Web Development
+   Ask them which course they want to learn about.
+   
+4. **Course Details**:
+   If they ask about a specific course or type a number/name:
+   - Give the duration and syllabus topics of that course.
+   - You must always conclude details or registration queries with this exact sentence:
+     "Thank you for your interest in Digital ORRA. Our admission team will contact you shortly with complete course details, fees, batch timings, and enrollment information."
+     
+5. **General Questions**:
+   If they ask questions like fees, timings, address, location, or general questions, answer them friendly in Hinglish/English. If they ask about fees, mention that pricing is affordable with easy installment options, and conclude with the contact message.
+`;
+
+  systemInstruction = flowInstructions + servicesText + coursesText;
 } catch (error) {
   console.error('Error loading courses.json for system instruction:', error.message);
   systemInstruction = process.env.SYSTEM_INSTRUCTION || '';
@@ -117,13 +149,13 @@ app.post('/webhook', async (req, res) => {
             const textBody = message.text.body;
             console.log(`Message content: "${textBody}"`);
 
-            // --- Route via Menu State Machine or Fallback to OpenRouter AI ---
-            console.log('Routing message through custom menu and AI...');
-            const responseText = await handleMessageRouting(from, textBody);
-            console.log(`Generated Response: "${responseText}"`);
+            // --- OpenRouter AI Auto-Reply with Conversational Memory ---
+            console.log('Generating automated response using OpenRouter AI with session memory...');
+            const aiReply = await generateAISessionReply(from, textBody);
+            console.log(`Generated Response: "${aiReply}"`);
 
             try {
-              await sendWhatsAppTextMessage(from, responseText);
+              await sendWhatsAppTextMessage(from, aiReply);
               console.log(`Auto-reply sent successfully to: ${from}`);
             } catch (sendError) {
               console.error('Error sending auto-reply to WhatsApp:', sendError.response ? sendError.response.data : sendError.message);
@@ -201,151 +233,6 @@ async function sendWhatsAppTextMessage(to, text) {
 }
 
 /**
- * Processes incoming text messages through the menu state machine or fallback to AI.
- */
-async function handleMessageRouting(from, textBody) {
-  const text = textBody.trim().toLowerCase();
-  
-  // Initialize session state if not exists
-  if (!sessions[from]) {
-    sessions[from] = {
-      state: 'START',
-      history: [
-        { role: 'system', content: systemInstruction }
-      ]
-    };
-  }
-
-  // Greeting or reset commands
-  const greetings = ['hi', 'hello', 'hey', 'start', 'menu', 'back', 'help', 'interested', 'welcome', 'yo', 'hola', 'hii', 'helo'];
-  const isGreeting = greetings.some(g => text === g || text.startsWith(g + ' '));
-
-  if (isGreeting || sessions[from].state === 'START') {
-    // If they sent a greeting or they are in START state (first message)
-    // and it's not a specific question, show the main menu
-    const isQuestion = text.includes('?') || text.includes('fee') || text.includes('price') || text.includes('cost') || text.includes('where') || text.includes('address') || text.includes('location') || text.includes('phone') || text.includes('contact');
-    
-    if (isGreeting || !isQuestion) {
-      sessions[from].state = 'AWAITING_INTEREST';
-      return `Are you interested in:
-Digital Marketing Services
-Digital Marketing Courses
-
-Reply with 1 or 2 to proceed.`;
-    }
-  }
-
-  const currentState = sessions[from].state;
-
-  if (currentState === 'AWAITING_INTEREST') {
-    if (text === '1' || text.includes('service')) {
-      sessions[from].state = 'START';
-      return `Services Offered:
-• Google Ads
-• Meta Ads (Facebook & Instagram)
-• SEO
-• Website Development
-• Social Media Marketing
-• Graphic Designing
-• Video Editing
-
-Thank you for your interest in Digital ORRA. Our admission team will contact you shortly with complete course details, fees, batch timings, and enrollment information.`;
-    } else if (text === '2' || text.includes('course')) {
-      sessions[from].state = 'AWAITING_COURSE';
-      return `👋 Welcome to Digital ORRA Academy!
-We offer industry-focused training with practical learning, live projects, internship opportunities, and placement assistance.
-Please choose a course:
-1️⃣ Basic Digital Marketing (2 Months)
-2️⃣ Advanced Digital Marketing (3 Months)
-3️⃣ Digital Marketing with AI (3.5–4 Months)
-4️⃣ Graphic Designing
-5️⃣ Video Editing
-6️⃣ Full Stack Web Development
-Reply with the course number to learn more.`;
-    }
-  }
-
-  if (currentState === 'AWAITING_COURSE') {
-    if (text === '1') {
-      sessions[from].state = 'START';
-      return `Basic Digital Marketing:
-• Social Media Marketing
-• Google & Meta Ads Basics
-• SEO Fundamentals
-• Content Strategy
-• Reporting & Analytics
-• Duration: 2 Months
-
-Thank you for your interest in Digital ORRA. Our admission team will contact you shortly with complete course details, fees, batch timings, and enrollment information.`;
-    } else if (text === '2') {
-      sessions[from].state = 'START';
-      return `Advanced Digital Marketing:
-• SEO
-• Google Ads
-• Meta Ads
-• Performance Marketing
-• Website Audit
-• Internship + Placement Assistance
-• Duration: 3 Months
-
-Thank you for your interest in Digital ORRA. Our admission team will contact you shortly with complete course details, fees, batch timings, and enrollment information.`;
-    } else if (text === '3') {
-      sessions[from].state = 'START';
-      return `Digital Marketing with AI:
-• Advanced Digital Marketing
-• ChatGPT
-• Gemini
-• Canva AI
-• Copy.ai
-• AI Marketing Automation
-• Smart Campaign Planning
-• Internship + Placement Assistance
-• Duration: 3.5–4 Months
-
-Thank you for your interest in Digital ORRA. Our admission team will contact you shortly with complete course details, fees, batch timings, and enrollment information.`;
-    } else if (text === '4') {
-      sessions[from].state = 'START';
-      return `Graphic Designing:
-• Photoshop
-• Illustrator
-• Canva Pro
-• Branding & Logo Design
-• Social Media Creatives
-• Portfolio Development
-
-Thank you for your interest in Digital ORRA. Our admission team will contact you shortly with complete course details, fees, batch timings, and enrollment information.`;
-    } else if (text === '5') {
-      sessions[from].state = 'START';
-      return `Video Editing:
-• Premiere Pro
-• After Effects
-• CapCut
-• Reels & Shorts Editing
-• Color Grading
-• Sound Design
-
-Thank you for your interest in Digital ORRA. Our admission team will contact you shortly with complete course details, fees, batch timings, and enrollment information.`;
-    } else if (text === '6') {
-      sessions[from].state = 'START';
-      return `Full Stack Web Development:
-• HTML, CSS, JavaScript
-• React.js Basics
-• Node.js
-• MySQL
-• APIs
-• Responsive Website Design
-• Real-World Projects
-
-Thank you for your interest in Digital ORRA. Our admission team will contact you shortly with complete course details, fees, batch timings, and enrollment information.`;
-    }
-  }
-
-  // Fallback to AI (OpenRouter) if no structured menu matches
-  console.log('No static menu match. Falling back to OpenRouter AI...');
-  return await generateAISessionReply(from, textBody);
-}
-
-/**
  * Helper function to generate response using OpenRouter AI with session memory
  */
 async function generateAISessionReply(userId, userMessage) {
@@ -357,26 +244,19 @@ async function generateAISessionReply(userId, userMessage) {
   // Initialize session history if it doesn't exist
   if (!sessions[userId]) {
     console.log(`Creating new chat session memory for user: ${userId}`);
-    sessions[userId] = {
-      state: 'START',
-      history: [
-        { role: 'system', content: systemInstruction }
-      ]
-    };
-  } else if (!sessions[userId].history) {
-    sessions[userId].history = [
+    sessions[userId] = [
       { role: 'system', content: systemInstruction }
     ];
   }
 
   // Add user message
-  sessions[userId].history.push({ role: 'user', content: userMessage });
+  sessions[userId].push({ role: 'user', content: userMessage });
 
   // Keep last 20 messages + system instruction to avoid token limits
-  if (sessions[userId].history.length > 21) {
-    sessions[userId].history = [
-      sessions[userId].history[0],
-      ...sessions[userId].history.slice(sessions[userId].history.length - 20)
+  if (sessions[userId].length > 21) {
+    sessions[userId] = [
+      sessions[userId][0],
+      ...sessions[userId].slice(sessions[userId].length - 20)
     ];
   }
 
@@ -384,7 +264,7 @@ async function generateAISessionReply(userId, userMessage) {
     const url = 'https://openrouter.ai/api/v1/chat/completions';
     const payload = {
       model: OPENROUTER_MODEL,
-      messages: sessions[userId].history
+      messages: sessions[userId]
     };
     const headers = {
       'Content-Type': 'application/json',
@@ -397,7 +277,7 @@ async function generateAISessionReply(userId, userMessage) {
     
     if (response.data && response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
       const aiReply = response.data.choices[0].message.content.trim();
-      sessions[userId].history.push({ role: 'assistant', content: aiReply });
+      sessions[userId].push({ role: 'assistant', content: aiReply });
       return aiReply;
     } else {
       console.error('Unexpected OpenRouter response structure:', JSON.stringify(response.data));
