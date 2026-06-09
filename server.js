@@ -4,8 +4,12 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const cors = require('cors');
+const mongoose = require('mongoose');
+const Session = require('./models/Session');
 
 const app = express();
+app.use(cors());
 app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 3000;
@@ -15,6 +19,11 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const META_API_VERSION = process.env.META_API_VERSION || 'v25.0';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free';
+const MONGODB_URI = process.env.MONGODB_URI;
+
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB Atlas successfully.'))
+  .catch((err) => console.error('Error connecting to MongoDB:', err.message));
 
 let systemInstruction = '';
 // Construct dynamic system instruction using courses.json if available
@@ -79,39 +88,33 @@ Your primary goal is to help users find the best solution for their business or 
   systemInstruction = process.env.SYSTEM_INSTRUCTION || '';
 }
 
-const sessions = {}; // In-memory session store to maintain conversation history per user
-
 if (OPENROUTER_API_KEY && OPENROUTER_API_KEY !== 'your_openrouter_api_key_here') {
   console.log(`Initializing OpenRouter AI engine with model: ${OPENROUTER_MODEL}`);
 } else {
   console.warn('\n⚠️ WARNING: OPENROUTER_API_KEY is not set in .env. The chatbot will use fallback messages instead of AI replies.\n');
 }
 
-// Root Route
+// Serve static frontend files
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Root Route - serve index.html
 app.get('/', (req, res) => {
-  res.send('WhatsApp Business API Webhook Server is running!');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 /**
  * WEBHOOK VERIFICATION (GET /webhook)
- * Meta calls this endpoint to verify the authenticity of your server.
- * When setting up Webhooks on Meta Developer Console, you specify:
- * 1. Callback URL: e.g., https://your-domain.ngrok-free.app/webhook
- * 2. Verify Token: must match process.env.VERIFY_TOKEN
  */
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  // Check if mode and token are in the query string
   if (mode && token) {
-    // Check if the mode and token match yours
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
       console.log('WEBHOOK_VERIFIED successfully');
       res.status(200).send(challenge);
     } else {
-      // Responds with '403 Forbidden' if verify tokens do not match
       console.log('Verification failed. Tokens do not match.');
       res.sendStatus(403);
     }
@@ -122,70 +125,178 @@ app.get('/webhook', (req, res) => {
 
 /**
  * WEBHOOK MESSAGE HANDLER (POST /webhook)
- * Meta calls this endpoint whenever a WhatsApp event occurs (e.g. message received, delivered, read).
  */
 app.post('/webhook', async (req, res) => {
-  // Log incoming webhook data for debugging
   console.log('Incoming Webhook Event:', JSON.stringify(req.body, null, 2));
 
-  // Verify this is a WhatsApp API webhook event
   if (req.body.object === 'whatsapp_business_account') {
     try {
       const entry = req.body.entry;
       if (entry && entry[0].changes && entry[0].changes[0].value) {
         const value = entry[0].changes[0].value;
         
-        // Check if there are messages in the payload
         if (value.messages && value.messages[0]) {
           const message = value.messages[0];
-          const from = message.from; // Sender's phone number
+          const from = message.from; 
           const messageId = message.id;
           const messageType = message.type;
           
           console.log(`Received message ID: ${messageId} of type ${messageType} from: ${from}`);
 
-          // Process text messages
           if (messageType === 'text') {
             const textBody = message.text.body;
             console.log(`Message content: "${textBody}"`);
 
-            // --- OpenRouter AI Auto-Reply with Conversational Memory ---
-            console.log('Generating automated response using OpenRouter AI with session memory...');
-            const aiReply = await generateAISessionReply(from, textBody);
-            console.log(`Generated Response: "${aiReply}"`);
+            // Find or create session in DB
+            let session = await Session.findOne({ phone: from });
+            if (!session) {
+              session = new Session({
+                phone: from,
+                aiEnabled: true,
+                pausedUntil: null,
+                history: [{ role: 'system', content: systemInstruction }]
+              });
+            } else if (!session.history || session.history.length === 0) {
+              session.history = [{ role: 'system', content: systemInstruction }];
+            }
 
-            try {
-              await sendWhatsAppTextMessage(from, aiReply);
-              console.log(`Auto-reply sent successfully to: ${from}`);
-            } catch (sendError) {
-              console.error('Error sending auto-reply to WhatsApp:', sendError.response ? sendError.response.data : sendError.message);
+            session.history.push({ role: 'user', content: textBody });
+            session.markModified('history');
+            await session.save();
+
+            const isAIEnabled = session.aiEnabled;
+            const isPaused = session.pausedUntil && session.pausedUntil > new Date();
+
+            if (isAIEnabled && !isPaused) {
+              console.log('Generating automated response using OpenRouter AI with session memory...');
+              const aiReply = await generateAISessionReply(from, textBody);
+              console.log(`Generated Response: "${aiReply}"`);
+
+              try {
+                await sendWhatsAppTextMessage(from, aiReply);
+                console.log(`Auto-reply sent successfully to: ${from}`);
+              } catch (sendError) {
+                console.error('Error sending auto-reply to WhatsApp:', sendError.response ? sendError.response.data : sendError.message);
+              }
+            } else {
+              console.log(`AI Response skipped for ${from}. AI Enabled: ${isAIEnabled}, Paused: ${!!isPaused}`);
             }
           }
         }
 
-        // Check if there are message status updates (sent, delivered, read)
         if (value.statuses && value.statuses[0]) {
           const status = value.statuses[0];
           console.log(`Message Status Update - ID: ${status.id}, Status: ${status.status}, Recipient: ${status.recipient_id}`);
         }
       }
       
-      // Responds to Meta with 200 OK so they know we processed the event
       res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
       console.error('Error handling webhook event:', error.message);
       res.status(500).send('ERROR');
     }
   } else {
-    // Return a 404 if the event is not from WhatsApp
     res.sendStatus(404);
   }
 });
 
 /**
+ * API ENDPOINTS FOR FRONTEND DASHBOARD
+ */
+
+// 1. Get all active sessions
+app.get('/api/sessions', async (req, res) => {
+  try {
+    const dbSessions = await Session.find({});
+    const list = dbSessions.map(session => ({
+      phone: session.phone,
+      aiEnabled: session.aiEnabled,
+      pausedUntil: session.pausedUntil,
+      lastMessage: session.history && session.history.length > 1 ? session.history[session.history.length - 1].content : ''
+    }));
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// 2. Get chat history for specific phone number
+app.get('/api/chats/:phone', async (req, res) => {
+  try {
+    const session = await Session.findOne({ phone: req.params.phone });
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    res.json({
+      phone: session.phone,
+      aiEnabled: session.aiEnabled,
+      pausedUntil: session.pausedUntil,
+      history: session.history || []
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// 3. Pause AI for a specific phone number
+app.post('/api/pause', async (req, res) => {
+  try {
+    const { to, durationMinutes } = req.body;
+    if (!to) return res.status(400).json({ error: 'Missing "to" number' });
+
+    let session = await Session.findOne({ phone: to });
+    if (!session) {
+      session = new Session({ phone: to, history: [{ role: 'system', content: systemInstruction }] });
+    }
+
+    const minutes = parseInt(durationMinutes) || 5;
+    session.pausedUntil = new Date(Date.now() + minutes * 60 * 1000);
+    await session.save();
+
+    res.json({ success: true, pausedUntil: session.pausedUntil });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// 4. Resume AI for a specific phone number
+app.post('/api/resume', async (req, res) => {
+  try {
+    const { to } = req.body;
+    if (!to) return res.status(400).json({ error: 'Missing "to" number' });
+
+    let session = await Session.findOne({ phone: to });
+    if (session) {
+      session.pausedUntil = null;
+      await session.save();
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// 5. Toggle AI ON/OFF for a specific phone number
+app.post('/api/toggle-ai', async (req, res) => {
+  try {
+    const { to, aiEnabled } = req.body;
+    if (!to) return res.status(400).json({ error: 'Missing "to" number' });
+
+    let session = await Session.findOne({ phone: to });
+    if (!session) {
+      session = new Session({ phone: to, history: [{ role: 'system', content: systemInstruction }] });
+    }
+    session.aiEnabled = !!aiEnabled;
+    await session.save();
+
+    res.json({ success: true, aiEnabled: session.aiEnabled });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+/**
  * API ENDPOINT TO SEND MESSAGES (POST /send-message)
- * Send a custom text message to any phone number from your backend.
- * Payload: { "to": "919876543210", "message": "Hello World" }
  */
 app.post('/send-message', async (req, res) => {
   const { to, message } = req.body;
@@ -196,6 +307,21 @@ app.post('/send-message', async (req, res) => {
 
   try {
     const response = await sendWhatsAppTextMessage(to, message);
+    
+    let session = await Session.findOne({ phone: to });
+    if (!session) {
+      session = new Session({ phone: to, history: [{ role: 'system', content: systemInstruction }] });
+    }
+    if (!session.history || session.history.length === 0) {
+      session.history = [{ role: 'system', content: systemInstruction }];
+    }
+
+    session.history.push({ role: 'assistant', content: message });
+    session.pausedUntil = new Date(Date.now() + 5 * 60 * 1000);
+    
+    session.markModified('history');
+    await session.save();
+
     res.status(200).json({ success: true, meta_response: response });
   } catch (error) {
     console.error('Error sending message API:', error.response ? error.response.data : error.message);
@@ -241,22 +367,17 @@ async function generateAISessionReply(userId, userMessage) {
     return "Thank you for contacting Digital ORRA. Our AI Assistant is undergoing setup. Please leave your requirement details and a team member will reach out to you shortly!";
   }
 
-  // Initialize session history if it doesn't exist
-  if (!sessions[userId]) {
-    console.log(`Creating new chat session memory for user: ${userId}`);
-    sessions[userId] = [
-      { role: 'system', content: systemInstruction }
-    ];
+  const session = await Session.findOne({ phone: userId });
+  if (!session || !session.history) {
+    return "Thank you for your message. We will get back to you shortly!";
   }
 
-  // Add user message
-  sessions[userId].push({ role: 'user', content: userMessage });
-
   // Keep last 20 messages + system instruction to avoid token limits
-  if (sessions[userId].length > 21) {
-    sessions[userId] = [
-      sessions[userId][0],
-      ...sessions[userId].slice(sessions[userId].length - 20)
+  let history = session.history;
+  if (history.length > 21) {
+    history = [
+      history[0],
+      ...history.slice(history.length - 20)
     ];
   }
 
@@ -264,7 +385,7 @@ async function generateAISessionReply(userId, userMessage) {
     const url = 'https://openrouter.ai/api/v1/chat/completions';
     const payload = {
       model: OPENROUTER_MODEL,
-      messages: sessions[userId]
+      messages: history
     };
     const headers = {
       'Content-Type': 'application/json',
@@ -277,7 +398,11 @@ async function generateAISessionReply(userId, userMessage) {
     
     if (response.data && response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
       const aiReply = response.data.choices[0].message.content.trim();
-      sessions[userId].push({ role: 'assistant', content: aiReply });
+      
+      session.history.push({ role: 'assistant', content: aiReply });
+      session.markModified('history');
+      await session.save();
+
       return aiReply;
     } else {
       console.error('Unexpected OpenRouter response structure:', JSON.stringify(response.data));
@@ -297,4 +422,3 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
-
