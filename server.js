@@ -161,6 +161,7 @@ app.post('/webhook', async (req, res) => {
             }
 
             session.history.push({ role: 'user', content: textBody });
+            session.unreadCount = (session.unreadCount || 0) + 1;
             session.markModified('history');
             await session.save();
 
@@ -210,6 +211,8 @@ app.get('/api/sessions', async (req, res) => {
     const dbSessions = await Session.find({});
     const list = dbSessions.map(session => ({
       phone: session.phone,
+      name: session.name || '',
+      unreadCount: session.unreadCount || 0,
       aiEnabled: session.aiEnabled,
       pausedUntil: session.pausedUntil,
       lastMessage: session.history && session.history.length > 1 ? session.history[session.history.length - 1].content : ''
@@ -227,17 +230,47 @@ app.get('/api/chats/:phone', async (req, res) => {
     if (!session) {
       return res.json({
         phone: req.params.phone,
+        name: '',
+        unreadCount: 0,
         aiEnabled: true,
         pausedUntil: null,
         history: []
       });
     }
+
+    // Reset unread count when chat is viewed
+    if (session.unreadCount > 0) {
+      session.unreadCount = 0;
+      await session.save();
+    }
+
     res.json({
       phone: session.phone,
+      name: session.name || '',
+      unreadCount: session.unreadCount || 0,
       aiEnabled: session.aiEnabled,
       pausedUntil: session.pausedUntil,
       history: session.history || []
     });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// 2.5 Update contact name
+app.post('/api/sessions/name', async (req, res) => {
+  try {
+    const { to, name } = req.body;
+    if (!to) return res.status(400).json({ error: 'Missing "to" number' });
+
+    let session = await Session.findOne({ phone: to });
+    if (!session) {
+      session = new Session({ phone: to, name, history: [{ role: 'system', content: systemInstruction }] });
+    } else {
+      session.name = name;
+    }
+    await session.save();
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Database error' });
   }

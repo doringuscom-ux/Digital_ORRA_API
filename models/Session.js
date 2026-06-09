@@ -6,6 +6,14 @@ const sessionSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  name: {
+    type: String,
+    default: ''
+  },
+  unreadCount: {
+    type: Number,
+    default: 0
+  },
   aiEnabled: {
     type: Boolean,
     default: true
