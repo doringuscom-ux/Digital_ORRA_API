@@ -7,6 +7,7 @@ const path = require('path');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const Session = require('./models/Session');
+const AdminToken = require('./models/AdminToken');
 
 const app = express();
 app.use(cors());
@@ -165,6 +166,24 @@ app.post('/webhook', async (req, res) => {
             session.markModified('history');
             await session.save();
 
+            // Send Push Notification
+            try {
+              const tokens = await AdminToken.find({});
+              const pushTokens = tokens.map(t => t.token);
+              if (pushTokens.length > 0) {
+                await axios.post('https://exp.host/--/api/v2/push/send', {
+                  to: pushTokens,
+                  sound: 'default',
+                  title: session.name ? session.name : from,
+                  body: textBody,
+                  data: { phone: from }
+                });
+                console.log(`Push notification sent to ${pushTokens.length} devices.`);
+              }
+            } catch (pushErr) {
+              console.error('Failed to send push notification:', pushErr.message);
+            }
+
             const isAIEnabled = session.aiEnabled;
             const isPaused = session.pausedUntil && session.pausedUntil > new Date();
 
@@ -205,10 +224,22 @@ app.post('/webhook', async (req, res) => {
  * API ENDPOINTS FOR FRONTEND DASHBOARD
  */
 
+// 0. Register Admin Push Token
+app.post('/api/admin/push-token', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token required' });
+    await AdminToken.findOneAndUpdate({ token }, { token }, { upsert: true, new: true });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 // 1. Get all active sessions
 app.get('/api/sessions', async (req, res) => {
   try {
-    const dbSessions = await Session.find({});
+    const dbSessions = await Session.find({}).sort({ updatedAt: -1 });
     const list = dbSessions.map(session => ({
       phone: session.phone,
       name: session.name || '',
