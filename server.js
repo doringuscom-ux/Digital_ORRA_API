@@ -225,7 +225,12 @@ app.get('/api/chats/:phone', async (req, res) => {
   try {
     const session = await Session.findOne({ phone: req.params.phone });
     if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+      return res.json({
+        phone: req.params.phone,
+        aiEnabled: true,
+        pausedUntil: null,
+        history: []
+      });
     }
     res.json({
       phone: session.phone,
