@@ -22,9 +22,18 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free';
 const MONGODB_URI = process.env.MONGODB_URI;
 
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB Atlas successfully.'))
-  .catch((err) => console.error('Error connecting to MongoDB:', err.message));
+let isConnected;
+const connectDB = async () => {
+  if (isConnected) return;
+  try {
+    const db = await mongoose.connect(MONGODB_URI);
+    isConnected = db.connections[0].readyState;
+    console.log('Connected to MongoDB Atlas successfully.');
+  } catch (error) {
+    console.error('Error connecting to MongoDB:', error.message);
+    throw error;
+  }
+};
 
 let systemInstruction = '';
 // Construct dynamic system instruction using courses.json if available
@@ -132,6 +141,7 @@ app.post('/webhook', async (req, res) => {
 
   if (req.body.object === 'whatsapp_business_account') {
     try {
+      await connectDB();
       const entry = req.body.entry;
       if (entry && entry[0].changes && entry[0].changes[0].value) {
         const value = entry[0].changes[0].value;
@@ -227,6 +237,7 @@ app.post('/webhook', async (req, res) => {
 // 0. Register Admin Push Token
 app.post('/api/admin/push-token', async (req, res) => {
   try {
+    await connectDB();
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'Token required' });
     await AdminToken.findOneAndUpdate({ token }, { token }, { upsert: true, new: true });
@@ -239,6 +250,7 @@ app.post('/api/admin/push-token', async (req, res) => {
 // 1. Get all active sessions
 app.get('/api/sessions', async (req, res) => {
   try {
+    await connectDB();
     const dbSessions = await Session.find({}).sort({ updatedAt: -1 });
     const list = dbSessions.map(session => ({
       phone: session.phone,
@@ -257,6 +269,7 @@ app.get('/api/sessions', async (req, res) => {
 // 2. Get chat history for specific phone number
 app.get('/api/chats/:phone', async (req, res) => {
   try {
+    await connectDB();
     const session = await Session.findOne({ phone: req.params.phone });
     if (!session) {
       return res.json({
@@ -291,6 +304,7 @@ app.get('/api/chats/:phone', async (req, res) => {
 // 2.5 Update contact name
 app.post('/api/sessions/name', async (req, res) => {
   try {
+    await connectDB();
     const { to, name } = req.body;
     if (!to) return res.status(400).json({ error: 'Missing "to" number' });
 
@@ -310,6 +324,7 @@ app.post('/api/sessions/name', async (req, res) => {
 // 3. Pause AI for a specific phone number
 app.post('/api/pause', async (req, res) => {
   try {
+    await connectDB();
     const { to, durationMinutes } = req.body;
     if (!to) return res.status(400).json({ error: 'Missing "to" number' });
 
@@ -331,6 +346,7 @@ app.post('/api/pause', async (req, res) => {
 // 4. Resume AI for a specific phone number
 app.post('/api/resume', async (req, res) => {
   try {
+    await connectDB();
     const { to } = req.body;
     if (!to) return res.status(400).json({ error: 'Missing "to" number' });
 
@@ -348,6 +364,7 @@ app.post('/api/resume', async (req, res) => {
 // 5. Toggle AI ON/OFF for a specific phone number
 app.post('/api/toggle-ai', async (req, res) => {
   try {
+    await connectDB();
     const { to, aiEnabled } = req.body;
     if (!to) return res.status(400).json({ error: 'Missing "to" number' });
 
@@ -375,6 +392,7 @@ app.post('/send-message', async (req, res) => {
   }
 
   try {
+    await connectDB();
     const response = await sendWhatsAppTextMessage(to, message);
     
     let session = await Session.findOne({ phone: to });
