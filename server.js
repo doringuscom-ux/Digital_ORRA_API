@@ -171,7 +171,7 @@ app.post('/webhook', async (req, res) => {
               session.history = [{ role: 'system', content: systemInstruction }];
             }
 
-            session.history.push({ role: 'user', content: textBody });
+            session.history.push({ role: 'user', content: textBody, timestamp: new Date().toISOString() });
             session.unreadCount = (session.unreadCount || 0) + 1;
             session.markModified('history');
             await session.save();
@@ -403,7 +403,7 @@ app.post('/send-message', async (req, res) => {
       session.history = [{ role: 'system', content: systemInstruction }];
     }
 
-    session.history.push({ role: 'assistant', content: message });
+    session.history.push({ role: 'assistant', content: message, timestamp: new Date().toISOString() });
     session.pausedUntil = new Date(Date.now() + 5 * 60 * 1000);
     
     session.markModified('history');
@@ -486,7 +486,7 @@ async function generateAISessionReply(userId, userMessage) {
     if (response.data && response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
       const aiReply = response.data.choices[0].message.content.trim();
       
-      session.history.push({ role: 'assistant', content: aiReply });
+      session.history.push({ role: 'assistant', content: aiReply, timestamp: new Date().toISOString() });
       session.markModified('history');
       await session.save();
 

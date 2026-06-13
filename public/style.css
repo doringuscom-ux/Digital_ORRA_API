@@ -448,6 +448,26 @@ input:checked + .slider:before {
   font-weight: 500;
 }
 
+.msg-content {
+  white-space: pre-wrap;
+}
+
+.msg-time {
+  font-size: 0.7rem;
+  opacity: 0.8;
+  text-align: right;
+  margin-top: 4px;
+}
+
+.bubble-user .msg-time {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.bubble-assistant .msg-time {
+  color: var(--text-secondary);
+}
+
+
 /* Chat Input Footer */
 .chat-input-area {
   padding: 16px 24px;

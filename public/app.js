@@ -151,7 +151,19 @@ function renderMessages(history) {
     // Align based on role
     const isUser = msg.role === 'user';
     bubble.className = `message-bubble ${isUser ? 'bubble-user' : 'bubble-assistant'}`;
-    bubble.innerText = msg.content;
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'msg-content';
+    contentDiv.innerText = msg.content;
+    bubble.appendChild(contentDiv);
+
+    if (msg.timestamp) {
+      const timeDiv = document.createElement('div');
+      timeDiv.className = 'msg-time';
+      const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      timeDiv.innerText = timeStr;
+      bubble.appendChild(timeDiv);
+    }
+
     messagesContainer.appendChild(bubble);
   });
 
@@ -280,7 +292,16 @@ async function handleSendMessage(e) {
   // Optimistic UI update: show message immediately
   const localBubble = document.createElement('div');
   localBubble.className = 'message-bubble bubble-assistant';
-  localBubble.innerText = message;
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'msg-content';
+  contentDiv.innerText = message;
+  localBubble.appendChild(contentDiv);
+
+  const timeDiv = document.createElement('div');
+  timeDiv.className = 'msg-time';
+  timeDiv.innerText = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  localBubble.appendChild(timeDiv);
+
   messagesContainer.appendChild(localBubble);
   scrollToBottom();
 
