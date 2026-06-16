@@ -71,7 +71,7 @@ Your primary goal is to help users find the best solution for their business or 
 
 ### SALES & COUNSELING GUIDELINES:
 1. **Welcome & Qualify**:
-   - Greet users warmly. If they greet you, introduce Digital ORRA Academy ("👋 Welcome to Digital ORRA Academy! We offer industry-focused training with practical learning, live projects, internships, and placements.") and ask if they are looking for courses to learn or services for their business.
+   - Greet users warmly. If they greet you, introduce Digital ORRA ("👋 Welcome to Digital ORRA! Hum practical learning, live projects aur placement assistance provide karte hain. \n\nKya aap apne liye koi course dekh rahe hain ya phir apne business ko grow karne ke liye services search kar rahe hain?") and ask if they are looking for courses to learn or services for their business.
    - Ask about their current background (student, freelancer, job-seeker, business owner) to customize your recommendation.
 
 2. **Transparent Fees & Selling Value**:
@@ -198,16 +198,19 @@ app.post('/webhook', async (req, res) => {
             const isPaused = session.pausedUntil && session.pausedUntil > new Date();
 
             if (isAIEnabled && !isPaused) {
-              console.log('Generating automated response using OpenRouter AI with session memory...');
-              const aiReply = await generateAISessionReply(from, textBody);
-              console.log(`Generated Response: "${aiReply}"`);
-
-              try {
-                await sendWhatsAppTextMessage(from, aiReply);
-                console.log(`Auto-reply sent successfully to: ${from}`);
-              } catch (sendError) {
-                console.error('Error sending auto-reply to WhatsApp:', sendError.response ? sendError.response.data : sendError.message);
-              }
+              console.log('Generating automated response using OpenRouter AI in background...');
+              
+              // Process AI response in background
+              (async () => {
+                try {
+                  const aiReply = await generateAISessionReply(from, textBody);
+                  console.log(`Generated Response: "${aiReply}"`);
+                  await sendWhatsAppTextMessage(from, aiReply);
+                  console.log(`Auto-reply sent successfully to: ${from}`);
+                } catch (sendError) {
+                  console.error('Error in background AI processing:', sendError.message);
+                }
+              })();
             } else {
               console.log(`AI Response skipped for ${from}. AI Enabled: ${isAIEnabled}, Paused: ${!!isPaused}`);
             }
@@ -481,7 +484,7 @@ async function generateAISessionReply(userId, userMessage) {
       'X-Title': 'Digital ORRA WhatsApp Bot'
     };
 
-    const response = await axios.post(url, payload, { headers, timeout: 15000 });
+    const response = await axios.post(url, payload, { headers, timeout: 60000 });
     
     if (response.data && response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
       const aiReply = response.data.choices[0].message.content.trim();
