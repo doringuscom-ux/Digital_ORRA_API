@@ -481,7 +481,7 @@ async function generateAISessionReply(userId, userMessage) {
       'X-Title': 'Digital ORRA WhatsApp Bot'
     };
 
-    const response = await axios.post(url, payload, { headers });
+    const response = await axios.post(url, payload, { headers, timeout: 15000 });
     
     if (response.data && response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
       const aiReply = response.data.choices[0].message.content.trim();
