@@ -154,8 +154,21 @@ app.post('/webhook', async (req, res) => {
           
           console.log(`Received message ID: ${messageId} of type ${messageType} from: ${from}`);
 
-          if (messageType === 'text') {
-            const textBody = message.text.body;
+          if (messageType === 'text' || messageType === 'interactive') {
+            let textBody = '';
+            let interactiveId = null;
+
+            if (messageType === 'text') {
+              textBody = message.text.body;
+            } else if (messageType === 'interactive' && message.interactive.type === 'list_reply') {
+              textBody = message.interactive.list_reply.title;
+              interactiveId = message.interactive.list_reply.id;
+            }
+
+            if (!textBody) {
+              return res.status(200).send('EVENT_RECEIVED');
+            }
+
             console.log(`Message content: "${textBody}"`);
 
             // Find or create session in DB
@@ -165,10 +178,18 @@ app.post('/webhook', async (req, res) => {
                 phone: from,
                 aiEnabled: true,
                 pausedUntil: null,
+                language: null,
                 history: [{ role: 'system', content: systemInstruction }]
               });
             } else if (!session.history || session.history.length === 0) {
               session.history = [{ role: 'system', content: systemInstruction }];
+            }
+
+            // Handle Language Selection Reply
+            if (messageType === 'interactive' && interactiveId && interactiveId.startsWith('lang_')) {
+              session.language = textBody;
+              await session.save();
+              console.log(`User ${from} selected language: ${session.language}`);
             }
 
             session.history.push({ role: 'user', content: textBody, timestamp: new Date().toISOString() });
@@ -193,6 +214,18 @@ app.post('/webhook', async (req, res) => {
             } catch (pushErr) {
               console.error('Failed to send push notification:', pushErr.message);
             }
+
+            // --- LANGUAGE SELECTION INTERCEPT ---
+            if (!session.language) {
+              console.log(`User ${from} has no language set. Sending language selection menu.`);
+              try {
+                await sendLanguageSelectionMenu(from);
+              } catch (err) {
+                console.error('Error sending language menu:', err.message);
+              }
+              return res.status(200).send('EVENT_RECEIVED'); // Wait for selection
+            }
+            // ------------------------------------
 
             const isAIEnabled = session.aiEnabled;
             const isPaused = session.pausedUntil && session.pausedUntil > new Date();
@@ -445,6 +478,48 @@ async function sendWhatsAppTextMessage(to, text) {
 }
 
 /**
+ * Helper function to send Language Selection Interactive Menu
+ */
+async function sendLanguageSelectionMenu(to) {
+  const url = `https://graph.facebook.com/${META_API_VERSION}/${PHONE_NUMBER_ID}/messages`;
+  
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: to,
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      header: { type: 'text', text: 'Choose Language' },
+      body: { text: 'Please select your preferred language to continue / कृपया जारी रखने के लिए अपनी भाषा चुनें:' },
+      footer: { text: 'Digital ORRA' },
+      action: {
+        button: 'Select Language',
+        sections: [
+          {
+            title: 'Languages',
+            rows: [
+              { id: 'lang_english', title: 'English' },
+              { id: 'lang_hindi', title: 'Hindi' },
+              { id: 'lang_hinglish', title: 'Hinglish' },
+              { id: 'lang_punjabi', title: 'Punjabi' }
+            ]
+          }
+        ]
+      }
+    }
+  };
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${WHATSAPP_TOKEN}`
+  };
+
+  const response = await axios.post(url, payload, { headers });
+  return response.data;
+}
+
+/**
  * Helper function to generate response using OpenRouter AI with session memory
  */
 async function generateAISessionReply(userId, userMessage) {
@@ -465,6 +540,14 @@ async function generateAISessionReply(userId, userMessage) {
       history[0],
       ...history.slice(history.length - 20)
     ];
+  }
+
+  // Inject language preference if set
+  if (session.language) {
+    history.push({ 
+      role: 'system', 
+      content: `The user has selected to converse in ${session.language}. You MUST reply ONLY in ${session.language}. Do not use any other language.`
+    });
   }
 
   try {

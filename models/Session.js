@@ -25,6 +25,10 @@ const sessionSchema = new mongoose.Schema({
   history: {
     type: Array,
     default: []
+  },
+  language: {
+    type: String,
+    default: null
   }
 }, { timestamps: true });
 
