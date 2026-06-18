@@ -544,10 +544,13 @@ async function generateAISessionReply(userId, userMessage) {
 
   // Inject language preference if set
   if (session.language) {
-    history.push({ 
-      role: 'system', 
-      content: `The user has selected to converse in ${session.language}. You MUST reply ONLY in ${session.language}. Do not use any other language.`
-    });
+    // We append it to the main system instruction (history[0]) to avoid 400 Bad Request from models
+    // that don't allow system messages at the end of the array.
+    // Create a deep copy of history[0] to avoid modifying the DB accidentally
+    history[0] = {
+      role: 'system',
+      content: history[0].content + `\n\nCRITICAL INSTRUCTION: The user has selected to converse in ${session.language}. You MUST reply ONLY in ${session.language}. Do not use any other language.`
+    };
   }
 
   try {
