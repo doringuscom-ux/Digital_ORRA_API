@@ -198,19 +198,15 @@ app.post('/webhook', async (req, res) => {
             const isPaused = session.pausedUntil && session.pausedUntil > new Date();
 
             if (isAIEnabled && !isPaused) {
-              console.log('Generating automated response using OpenRouter AI in background...');
-              
-              // Process AI response in background
-              (async () => {
-                try {
-                  const aiReply = await generateAISessionReply(from, textBody);
-                  console.log(`Generated Response: "${aiReply}"`);
-                  await sendWhatsAppTextMessage(from, aiReply);
-                  console.log(`Auto-reply sent successfully to: ${from}`);
-                } catch (sendError) {
-                  console.error('Error in background AI processing:', sendError.message);
-                }
-              })();
+              console.log('Generating automated response using OpenRouter AI...');
+              try {
+                const aiReply = await generateAISessionReply(from, textBody);
+                console.log(`Generated Response: "${aiReply}"`);
+                await sendWhatsAppTextMessage(from, aiReply);
+                console.log(`Auto-reply sent successfully to: ${from}`);
+              } catch (sendError) {
+                console.error('Error sending AI response:', sendError.message);
+              }
             } else {
               console.log(`AI Response skipped for ${from}. AI Enabled: ${isAIEnabled}, Paused: ${!!isPaused}`);
             }
@@ -484,7 +480,7 @@ async function generateAISessionReply(userId, userMessage) {
       'X-Title': 'Digital ORRA WhatsApp Bot'
     };
 
-    const response = await axios.post(url, payload, { headers, timeout: 60000 });
+    const response = await axios.post(url, payload, { headers, timeout: 8000 });
     
     if (response.data && response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
       const aiReply = response.data.choices[0].message.content.trim();
