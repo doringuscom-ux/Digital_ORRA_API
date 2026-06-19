@@ -706,19 +706,17 @@ app.post('/api/broadcast', async (req, res) => {
   }
 });
 
-// 8. Upload Image to Cloudinary
-app.post('/api/upload', upload.single('image'), async (req, res) => {
+// 8. Upload Image to Cloudinary (Base64)
+app.post('/api/upload', async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No image file provided' });
+    const { image } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'No image data provided' });
     }
-    const result = await cloudinary.uploader.upload(req.file.path, {
+    
+    const result = await cloudinary.uploader.upload(image, {
       folder: 'whatsapp_broadcasts'
     });
-    // Remove local file
-    try {
-      fs.unlinkSync(req.file.path);
-    } catch (e) {}
     
     res.json({ url: result.secure_url });
   } catch (err) {
