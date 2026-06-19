@@ -6,12 +6,24 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+
+cloudinary.config({ 
+  cloud_name: 'djdbtfjlz', 
+  api_key: '562942733763668', 
+  api_secret: 'kh6LEU7RNU9y9S-SLHrDqOorhv0' 
+});
+
+const upload = multer({ dest: 'uploads/' });
+
 const Session = require('./models/Session');
 const AdminToken = require('./models/AdminToken');
 
 const app = express();
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 
 const PORT = process.env.PORT || 3000;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
@@ -613,7 +625,7 @@ app.get('/api/templates', async (req, res) => {
 // 7. Send Broadcast
 app.post('/api/broadcast', async (req, res) => {
   try {
-    const { templateName, languageCode, numbers } = req.body;
+    const { templateName, languageCode, numbers, components } = req.body;
     
     if (!templateName || !numbers || !Array.isArray(numbers)) {
       return res.status(400).json({ error: 'Invalid request body' });
@@ -637,6 +649,10 @@ app.post('/api/broadcast', async (req, res) => {
               language: { code: languageCode || 'en' }
             }
           };
+          
+          if (components && Array.isArray(components) && components.length > 0) {
+            payload.template.components = components;
+          }
 
           await axios.post(url, payload, {
             headers: {
@@ -645,6 +661,36 @@ app.post('/api/broadcast', async (req, res) => {
             }
           });
           successCount++;
+
+          // --- Create Session and Log Broadcast Message ---
+          try {
+            let session = await Session.findOne({ phone: toPhone });
+            if (!session) {
+              session = new Session({
+                phone: toPhone,
+                aiEnabled: true,
+                pausedUntil: null,
+                language: null,
+                history: []
+              });
+            }
+            if (!session.history) {
+              session.history = [];
+            }
+            
+            let broadcastDesc = `[Broadcast Template: ${templateName}]`;
+            session.history.push({ 
+              role: 'assistant', 
+              content: broadcastDesc, 
+              timestamp: new Date().toISOString() 
+            });
+            session.markModified('history');
+            await session.save();
+            console.log(`Saved broadcast history for ${toPhone}`);
+          } catch (dbErr) {
+            console.error(`Failed to save broadcast history for ${toPhone}:`, dbErr.message);
+          }
+          // ----------------------------------------------
         } catch (error) {
           failCount++;
           console.error(`Broadcast failed for ${toPhone}:`, error.response ? error.response.data : error.message);
@@ -660,8 +706,30 @@ app.post('/api/broadcast', async (req, res) => {
   }
 });
 
-// Start Server
-app.listen(PORT, () => {
+// 8. Upload Image to Cloudinary
+app.post('/api/upload', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file provided' });
+    }
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: 'whatsapp_broadcasts'
+    });
+    // Remove local file
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (e) {}
+    
+    res.json({ url: result.secure_url });
+  } catch (err) {
+    console.error('Cloudinary upload error:', err);
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
+});
+
+/**
+ * START SERVER
+ */app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
   console.log(`Webhook URL for Meta Dashboard: http://<your-public-url>/webhook`);
   console.log(`Verify Token is: ${VERIFY_TOKEN}`);
