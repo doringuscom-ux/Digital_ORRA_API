@@ -17,6 +17,7 @@ const PORT = process.env.PORT || 3000;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const BUSINESS_ACCOUNT_ID = process.env.BUSINESS_ACCOUNT_ID;
 const META_API_VERSION = process.env.META_API_VERSION || 'v25.0';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free';
@@ -585,6 +586,79 @@ async function generateAISessionReply(userId, userMessage) {
     return "Thank you for your message. We will get back to you shortly!";
   }
 }
+
+// 6. Get all approved WhatsApp Message Templates
+app.get('/api/templates', async (req, res) => {
+  try {
+    if (!BUSINESS_ACCOUNT_ID || !WHATSAPP_TOKEN) {
+      return res.status(500).json({ error: 'BUSINESS_ACCOUNT_ID or WHATSAPP_TOKEN is missing' });
+    }
+    
+    const url = `https://graph.facebook.com/${META_API_VERSION}/${BUSINESS_ACCOUNT_ID}/message_templates`;
+    const response = await axios.get(url, {
+      headers: {
+        'Authorization': `Bearer ${WHATSAPP_TOKEN}`
+      }
+    });
+    
+    // Filter out only APPROVED templates
+    const templates = response.data.data.filter(t => t.status === 'APPROVED');
+    res.json(templates);
+  } catch (error) {
+    console.error('Error fetching templates:', error.response ? error.response.data : error.message);
+    res.status(500).json({ error: 'Failed to fetch templates from Meta API' });
+  }
+});
+
+// 7. Send Broadcast
+app.post('/api/broadcast', async (req, res) => {
+  try {
+    const { templateName, languageCode, numbers } = req.body;
+    
+    if (!templateName || !numbers || !Array.isArray(numbers)) {
+      return res.status(400).json({ error: 'Invalid request body' });
+    }
+
+    res.json({ success: true, message: `Broadcast started for ${numbers.length} numbers.` });
+
+    // Run broadcast asynchronously in the background so request doesn't timeout
+    setTimeout(async () => {
+      let successCount = 0;
+      let failCount = 0;
+      for (const toPhone of numbers) {
+        try {
+          const url = `https://graph.facebook.com/${META_API_VERSION}/${PHONE_NUMBER_ID}/messages`;
+          const payload = {
+            messaging_product: 'whatsapp',
+            to: toPhone,
+            type: 'template',
+            template: {
+              name: templateName,
+              language: { code: languageCode || 'en' }
+            }
+          };
+
+          await axios.post(url, payload, {
+            headers: {
+              'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          successCount++;
+        } catch (error) {
+          failCount++;
+          console.error(`Broadcast failed for ${toPhone}:`, error.response ? error.response.data : error.message);
+        }
+        // Rate limit 1 sec
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      console.log(`Broadcast finished. Success: ${successCount}, Fail: ${failCount}`);
+    }, 0);
+
+  } catch (error) {
+    res.status(500).json({ error: 'Broadcast failed to start' });
+  }
+});
 
 // Start Server
 app.listen(PORT, () => {
