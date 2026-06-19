@@ -15,7 +15,7 @@ cloudinary.config({
   api_secret: 'kh6LEU7RNU9y9S-SLHrDqOorhv0' 
 });
 
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({ dest: '/tmp' });
 
 const Session = require('./models/Session');
 const AdminToken = require('./models/AdminToken');
