@@ -19,6 +19,8 @@ const upload = multer({ dest: '/tmp' });
 
 const Session = require('./models/Session');
 const AdminToken = require('./models/AdminToken');
+const BroadcastJob = require('./models/BroadcastJob');
+const BroadcastRecipient = require('./models/BroadcastRecipient');
 
 const app = express();
 app.use(cors());
@@ -262,6 +264,20 @@ app.post('/webhook', async (req, res) => {
         if (value.statuses && value.statuses[0]) {
           const status = value.statuses[0];
           console.log(`Message Status Update - ID: ${status.id}, Status: ${status.status}, Recipient: ${status.recipient_id}`);
+          
+          // Update BroadcastRecipient if it exists
+          try {
+            const updateData = { status: status.status, updatedAt: Date.now() };
+            if (status.errors && status.errors.length > 0) {
+              updateData.errorMessage = JSON.stringify(status.errors[0].message || status.errors[0].error_data?.details || status.errors);
+            }
+            await BroadcastRecipient.findOneAndUpdate(
+              { messageId: status.id },
+              updateData
+            );
+          } catch (dbErr) {
+            console.error('Failed to update recipient status from webhook', dbErr.message);
+          }
         }
       }
       
@@ -631,12 +647,45 @@ app.post('/api/broadcast', async (req, res) => {
       return res.status(400).json({ error: 'Invalid request body' });
     }
 
-    res.json({ success: true, message: `Broadcast started for ${numbers.length} numbers.` });
+    // CREATE BROADCAST JOB
+    const job = new BroadcastJob({
+      templateName,
+      totalNumbers: numbers.length
+    });
+    await job.save();
+
+    // CREATE PENDING RECIPIENTS
+    const recipients = numbers.map(phone => ({
+      jobId: job._id,
+      phone: phone,
+      status: 'pending'
+    }));
+    await BroadcastRecipient.insertMany(recipients);
+
+    res.json({ success: true, message: `Broadcast started for ${numbers.length} numbers.`, jobId: job._id });
 
     // Run broadcast asynchronously in the background so request doesn't timeout
     setTimeout(async () => {
       let successCount = 0;
       let failCount = 0;
+      
+      // Add Cloudinary compression transformations to the image URLs to prevent 5MB limits
+      if (components && Array.isArray(components)) {
+        components.forEach(comp => {
+          if (comp.type === 'header' && comp.parameters) {
+            comp.parameters.forEach(param => {
+              if (param.type === 'image' && param.image && param.image.link) {
+                let link = param.image.link;
+                if (link.includes('res.cloudinary.com') && !link.includes('/upload/w_800,q_auto,f_auto/')) {
+                  link = link.replace('/upload/', '/upload/w_800,q_auto,f_auto/');
+                  param.image.link = link;
+                }
+              }
+            });
+          }
+        });
+      }
+
       for (const toPhone of numbers) {
         try {
           const url = `https://graph.facebook.com/${META_API_VERSION}/${PHONE_NUMBER_ID}/messages`;
@@ -654,12 +703,24 @@ app.post('/api/broadcast', async (req, res) => {
             payload.template.components = components;
           }
 
-          await axios.post(url, payload, {
+          const response = await axios.post(url, payload, {
             headers: {
               'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
               'Content-Type': 'application/json'
             }
           });
+          
+          let metaMessageId = null;
+          if (response.data && response.data.messages && response.data.messages.length > 0) {
+            metaMessageId = response.data.messages[0].id;
+          }
+
+          // Update Recipient to SENT
+          await BroadcastRecipient.findOneAndUpdate(
+            { jobId: job._id, phone: toPhone },
+            { status: 'sent', messageId: metaMessageId, updatedAt: Date.now() }
+          );
+
           successCount++;
 
           // --- Create Session and Log Broadcast Message ---
@@ -693,7 +754,14 @@ app.post('/api/broadcast', async (req, res) => {
           // ----------------------------------------------
         } catch (error) {
           failCount++;
-          console.error(`Broadcast failed for ${toPhone}:`, error.response ? error.response.data : error.message);
+          const errData = error.response ? JSON.stringify(error.response.data.error.message || error.response.data) : error.message;
+          console.error(`Broadcast failed for ${toPhone}:`, errData);
+          
+          // Update Recipient to FAILED
+          await BroadcastRecipient.findOneAndUpdate(
+            { jobId: job._id, phone: toPhone },
+            { status: 'failed', errorMessage: errData, updatedAt: Date.now() }
+          );
         }
         // Rate limit 1 sec
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -722,6 +790,46 @@ app.post('/api/upload', async (req, res) => {
   } catch (err) {
     console.error('Cloudinary upload error:', err);
     res.status(500).json({ error: 'Failed to upload image' });
+  }
+});
+
+// 9. Get Broadcast Jobs
+app.get('/api/broadcasts', async (req, res) => {
+  try {
+    await connectDB();
+    const jobs = await BroadcastJob.find({}).sort({ createdAt: -1 });
+    
+    // For each job, count the status totals (optional optimization, but good for UI)
+    const jobsWithStats = await Promise.all(jobs.map(async (job) => {
+      const stats = await BroadcastRecipient.aggregate([
+        { $match: { jobId: job._id } },
+        { $group: { _id: "$status", count: { $sum: 1 } } }
+      ]);
+      const statusCounts = stats.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, { pending: 0, sent: 0, delivered: 0, read: 0, failed: 0 });
+      
+      return {
+        ...job.toObject(),
+        stats: statusCounts
+      };
+    }));
+
+    res.json(jobsWithStats);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch broadcasts' });
+  }
+});
+
+// 10. Get Broadcast Recipients for a Job
+app.get('/api/broadcasts/:jobId', async (req, res) => {
+  try {
+    await connectDB();
+    const recipients = await BroadcastRecipient.find({ jobId: req.params.jobId }).sort({ updatedAt: -1 });
+    res.json(recipients);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch recipients' });
   }
 });
 
