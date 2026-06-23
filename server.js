@@ -21,6 +21,7 @@ const Session = require('./models/Session');
 const AdminToken = require('./models/AdminToken');
 const BroadcastJob = require('./models/BroadcastJob');
 const BroadcastRecipient = require('./models/BroadcastRecipient');
+const AppConfig = require('./models/AppConfig');
 
 const app = express();
 app.use(cors());
@@ -149,6 +150,58 @@ app.get('/webhook', (req, res) => {
 });
 
 /**
+ * AUTHENTICATION MIDDLEWARE
+ * Secures all /api/* routes except webhook
+ */
+app.use('/api', async (req, res, next) => {
+  try {
+    await connectDB();
+    const providedPassword = req.headers['x-api-password'];
+    
+    // Fetch stored password
+    let config = await AppConfig.findOne({ key: 'api_password' });
+    let currentPassword = '1234'; // Default
+    if (config) {
+      currentPassword = config.value;
+    }
+    
+    // Check if provided password matches
+    if (!providedPassword || providedPassword !== currentPassword) {
+      console.warn(`Unauthorized API access attempt. Path: ${req.path}`);
+      return res.status(401).json({ error: 'Unauthorized: Invalid API Password' });
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Auth Middleware Error:', error.message);
+    res.status(500).json({ error: 'Server Error in Auth Middleware' });
+  }
+});
+
+/**
+ * CHANGE PASSWORD ENDPOINT
+ */
+app.post('/api/change-password', async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.trim() === '') {
+      return res.status(400).json({ error: 'New password cannot be empty' });
+    }
+    
+    await AppConfig.findOneAndUpdate(
+      { key: 'api_password' },
+      { value: newPassword.trim() },
+      { upsert: true, new: true }
+    );
+    
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (error) {
+    console.error('Change Password Error:', error.message);
+    res.status(500).json({ error: 'Failed to update password' });
+  }
+});
+
+/**
  * WEBHOOK MESSAGE HANDLER (POST /webhook)
  */
 app.post('/webhook', async (req, res) => {
@@ -250,7 +303,19 @@ app.post('/webhook', async (req, res) => {
               try {
                 const aiReply = await generateAISessionReply(from, textBody);
                 console.log(`Generated Response: "${aiReply}"`);
-                await sendWhatsAppTextMessage(from, aiReply);
+                const response = await sendWhatsAppTextMessage(from, aiReply);
+                let metaMsgId = null;
+                if (response.messages && response.messages.length > 0) metaMsgId = response.messages[0].id;
+                
+                session.history.push({ 
+                  role: 'assistant', 
+                  content: aiReply, 
+                  timestamp: new Date().toISOString(),
+                  messageId: metaMsgId,
+                  status: 'sent'
+                });
+                session.markModified('history');
+                await session.save();
                 console.log(`Auto-reply sent successfully to: ${from}`);
               } catch (sendError) {
                 console.error('Error sending AI response:', sendError.message);
@@ -275,6 +340,17 @@ app.post('/webhook', async (req, res) => {
               { messageId: status.id },
               updateData
             );
+            
+            // Also update Session history if this message is part of a chat
+            const sessionToUpdate = await Session.findOne({ "history.messageId": status.id });
+            if (sessionToUpdate) {
+              const historyItem = sessionToUpdate.history.find(h => h.messageId === status.id);
+              if (historyItem) {
+                historyItem.status = status.status;
+                sessionToUpdate.markModified('history');
+                await sessionToUpdate.save();
+              }
+            }
           } catch (dbErr) {
             console.error('Failed to update recipient status from webhook', dbErr.message);
           }
@@ -464,7 +540,16 @@ app.post('/send-message', async (req, res) => {
       session.history = [{ role: 'system', content: systemInstruction }];
     }
 
-    session.history.push({ role: 'assistant', content: message, timestamp: new Date().toISOString() });
+    let metaMsgId = null;
+    if (response.messages && response.messages.length > 0) metaMsgId = response.messages[0].id;
+
+    session.history.push({ 
+      role: 'assistant', 
+      content: message, 
+      timestamp: new Date().toISOString(),
+      messageId: metaMsgId,
+      status: 'sent'
+    });
     session.pausedUntil = new Date(Date.now() + 5 * 60 * 1000);
     
     session.markModified('history');
@@ -743,7 +828,9 @@ app.post('/api/broadcast', async (req, res) => {
             session.history.push({ 
               role: 'assistant', 
               content: broadcastDesc, 
-              timestamp: new Date().toISOString() 
+              timestamp: new Date().toISOString(),
+              messageId: metaMessageId,
+              status: 'sent'
             });
             session.markModified('history');
             await session.save();
