@@ -587,8 +587,16 @@ async function sendWhatsAppTextMessage(to, text) {
     'Authorization': `Bearer ${WHATSAPP_TOKEN}`
   };
 
-  const response = await axios.post(url, payload, { headers });
-  return response.data;
+  try {
+    const response = await axios.post(url, payload, { headers });
+    return response.data;
+  } catch (error) {
+    console.error('Error sending WhatsApp text message (EPIPE/Network Error):', error.message);
+    if (error.response && error.response.data) {
+      console.error('Meta API Error Details:', JSON.stringify(error.response.data));
+    }
+    return null; // Return null instead of throwing to prevent app crash
+  }
 }
 
 /**
@@ -629,8 +637,16 @@ async function sendLanguageSelectionMenu(to) {
     'Authorization': `Bearer ${WHATSAPP_TOKEN}`
   };
 
-  const response = await axios.post(url, payload, { headers });
-  return response.data;
+  try {
+    const response = await axios.post(url, payload, { headers });
+    return response.data;
+  } catch (error) {
+    console.error('Error sending Language Selection Menu (EPIPE/Network Error):', error.message);
+    if (error.response && error.response.data) {
+      console.error('Meta API Error Details:', JSON.stringify(error.response.data));
+    }
+    return null;
+  }
 }
 
 /**
