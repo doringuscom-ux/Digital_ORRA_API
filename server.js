@@ -577,6 +577,64 @@ app.post('/send-message', async (req, res) => {
 });
 
 /**
+ * API ENDPOINT FOR MOBILE APP (POST /api/chats/:phone/reply)
+ */
+app.post('/api/chats/:phone/reply', async (req, res) => {
+  const { to, message } = req.body;
+  const phone = req.params.phone || to;
+
+  if (!phone || !message) {
+    return res.status(400).json({ error: 'Please provide both phone number and message body.' });
+  }
+
+  console.log(`[MOBILE MANUAL SEND] Request received. To: ${phone}, Message: ${message}`);
+  
+  try {
+    await connectDB();
+    const response = await sendWhatsAppTextMessage(phone, message);
+    console.log(`[MOBILE MANUAL SEND] Meta API Response:`, response);
+    
+    if (!response) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Message failed to send. This usually happens if the 24-hour window has expired or the number is invalid." 
+      });
+    }
+
+    let session = await Session.findOne({ phone: phone });
+    if (!session) {
+      session = new Session({ phone: phone, history: [{ role: 'system', content: systemInstruction }] });
+    }
+    if (!session.history || session.history.length === 0) {
+      session.history = [{ role: 'system', content: systemInstruction }];
+    }
+
+    let metaMsgId = null;
+    if (response.messages && response.messages.length > 0) metaMsgId = response.messages[0].id;
+
+    session.history.push({ 
+      role: 'assistant', 
+      content: message, 
+      timestamp: new Date().toISOString(),
+      messageId: metaMsgId,
+      status: 'sent'
+    });
+    session.pausedUntil = new Date(Date.now() + 5 * 60 * 1000);
+    
+    session.markModified('history');
+    await session.save();
+
+    res.status(200).json({ success: true, meta_response: response });
+  } catch (error) {
+    console.error('Error sending message from mobile API:', error.response ? error.response.data : error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: error.response ? error.response.data : error.message 
+    });
+  }
+});
+
+/**
  * Helper function to send text message via WhatsApp Cloud API
  */
 async function sendWhatsAppTextMessage(to, text) {
