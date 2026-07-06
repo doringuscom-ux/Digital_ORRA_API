@@ -532,6 +532,13 @@ app.post('/send-message', async (req, res) => {
     await connectDB();
     const response = await sendWhatsAppTextMessage(to, message);
     
+    if (!response) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Message failed to send. This usually happens if the 24-hour window has expired or the number is invalid." 
+      });
+    }
+
     let session = await Session.findOne({ phone: to });
     if (!session) {
       session = new Session({ phone: to, history: [{ role: 'system', content: systemInstruction }] });
