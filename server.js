@@ -662,12 +662,12 @@ async function sendLanguageSelectionMenu(to) {
 async function generateAISessionReply(userId, userMessage) {
   if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === 'your_openrouter_api_key_here') {
     console.log('OpenRouter key not configured. Using fallback response.');
-    return "Thank you for contacting Digital ORRA. Our AI Assistant is undergoing setup. Please leave your requirement details and a team member will reach out to you shortly!";
+    return "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
   }
 
   const session = await Session.findOne({ phone: userId });
   if (!session || !session.history) {
-    return "Thank you for your message. We will get back to you shortly!";
+    return "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
   }
 
   // Keep last 20 messages + system instruction to avoid token limits
@@ -692,9 +692,13 @@ async function generateAISessionReply(userId, userMessage) {
 
   try {
     const url = 'https://openrouter.ai/api/v1/chat/completions';
-    const payload = {
+    const payload1 = {
       model: OPENROUTER_MODEL,
       messages: history
+    };
+    const payload2 = { 
+      model: process.env.OPENROUTER_MODEL_2 || 'google/gemma-4-26b-a4b-it:free', 
+      messages: history 
     };
     const headers = {
       'Content-Type': 'application/json',
@@ -703,7 +707,10 @@ async function generateAISessionReply(userId, userMessage) {
       'X-Title': 'Digital ORRA WhatsApp Bot'
     };
 
-    const response = await axios.post(url, payload, { headers, timeout: 8000 });
+    const req1 = axios.post(url, payload1, { headers, timeout: 30000 });
+    const req2 = axios.post(url, payload2, { headers, timeout: 30000 });
+
+    const response = await Promise.any([req1, req2]);
     
     if (response.data && response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
       const aiReply = response.data.choices[0].message.content.trim();
@@ -715,11 +722,11 @@ async function generateAISessionReply(userId, userMessage) {
       return aiReply;
     } else {
       console.error('Unexpected OpenRouter response structure:', JSON.stringify(response.data));
-      return "Thank you for your message. We will get back to you shortly!";
+      return "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
     }
   } catch (error) {
     console.error(`Error calling OpenRouter API for session ${userId}:`, error.response ? error.response.data : error.message);
-    return "Thank you for your message. We will get back to you shortly!";
+    return "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
   }
 }
 
@@ -1010,10 +1017,18 @@ app.post('/api/chats/:phone/messages/bulk-delete', async (req, res) => {
 
 /**
  * START SERVER
- */app.listen(PORT, () => {
+ */
+app.listen(PORT, async () => {
   console.log(`Server is listening on port ${PORT}`);
   console.log(`Webhook URL for Meta Dashboard: http://<your-public-url>/webhook`);
   console.log(`Verify Token is: ${VERIFY_TOKEN}`);
+
+  // Connect to DB immediately on startup
+  try {
+    await connectDB();
+  } catch (err) {
+    console.error("Initial DB Connection failed", err);
+  }
 });
 
 module.exports = app;
