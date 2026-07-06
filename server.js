@@ -528,9 +528,13 @@ app.post('/send-message', async (req, res) => {
     return res.status(400).json({ error: 'Please provide both "to" (phone number) and "message" body.' });
   }
 
+  console.log(`[MANUAL SEND] Request received. To: ${to}, Message: ${message}`);
+  
   try {
     await connectDB();
+    console.log(`[MANUAL SEND] DB Connected. Attempting to send WhatsApp message...`);
     const response = await sendWhatsAppTextMessage(to, message);
+    console.log(`[MANUAL SEND] Meta API Response:`, response);
     
     if (!response) {
       return res.status(400).json({ 
