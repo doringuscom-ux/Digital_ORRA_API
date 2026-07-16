@@ -1083,6 +1083,20 @@ app.listen(PORT, async () => {
   } catch (err) {
     console.error("Initial DB Connection failed", err);
   }
+
+  // Heartbeat to prevent Render from sleeping
+  const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || process.env.PING_URL;
+  if (RENDER_EXTERNAL_URL) {
+    console.log(`Setting up heartbeat to ${RENDER_EXTERNAL_URL} every 14 minutes.`);
+    setInterval(async () => {
+      try {
+        await axios.get(RENDER_EXTERNAL_URL);
+        console.log(`[Heartbeat] Ping sent to ${RENDER_EXTERNAL_URL} to keep server awake.`);
+      } catch (err) {
+        console.error('[Heartbeat] Ping failed:', err.message);
+      }
+    }, 14 * 60 * 1000); // 14 minutes
+  }
 });
 
 module.exports = app;
