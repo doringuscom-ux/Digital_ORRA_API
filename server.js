@@ -8,6 +8,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 cloudinary.config({ 
   cloud_name: 'djdbtfjlz', 
@@ -34,8 +35,6 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const BUSINESS_ACCOUNT_ID = process.env.BUSINESS_ACCOUNT_ID;
 const META_API_VERSION = process.env.META_API_VERSION || 'v25.0';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free';
 const MONGODB_URI = process.env.MONGODB_URI;
 
 let isConnected;
@@ -114,10 +113,10 @@ Your primary goal is to help users find the best solution for their business or 
   systemInstruction = process.env.SYSTEM_INSTRUCTION || '';
 }
 
-if (OPENROUTER_API_KEY && OPENROUTER_API_KEY !== 'your_openrouter_api_key_here') {
-  console.log(`Initializing OpenRouter AI engine with model: ${OPENROUTER_MODEL}`);
+if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here') {
+  console.log(`Initializing Gemini AI engine`);
 } else {
-  console.warn('\n⚠️ WARNING: OPENROUTER_API_KEY is not set in .env. The chatbot will use fallback messages instead of AI replies.\n');
+  console.warn('\n⚠️ WARNING: GEMINI_API_KEY is not set in .env. The chatbot will use fallback messages instead of AI replies.\n');
 }
 
 // Serve static frontend files
@@ -222,6 +221,11 @@ app.post('/webhook', async (req, res) => {
           
           console.log(`Received message ID: ${messageId} of type ${messageType} from: ${from}`);
 
+          let profileName = '';
+          if (value.contacts && value.contacts[0] && value.contacts[0].profile && value.contacts[0].profile.name) {
+            profileName = value.contacts[0].profile.name;
+          }
+
           if (messageType === 'text' || messageType === 'interactive') {
             let textBody = '';
             let interactiveId = null;
@@ -244,13 +248,40 @@ app.post('/webhook', async (req, res) => {
             if (!session) {
               session = new Session({
                 phone: from,
+                name: profileName,
                 aiEnabled: true,
                 pausedUntil: null,
                 language: null,
                 history: [{ role: 'system', content: systemInstruction }]
               });
-            } else if (!session.history || session.history.length === 0) {
-              session.history = [{ role: 'system', content: systemInstruction }];
+            } else {
+              if (profileName && !session.name) {
+                session.name = profileName;
+              }
+              if (!session.history || session.history.length === 0) {
+                session.history = [{ role: 'system', content: systemInstruction }];
+              }
+            }
+
+            // Deduplication check
+            const isDuplicate = session.history.some(msg => msg.messageId === messageId);
+            if (isDuplicate) {
+              console.log(`Ignoring duplicate message ID: ${messageId}`);
+              return res.status(200).send('EVENT_RECEIVED');
+            }
+
+            // Handle keywords for Menu or Language Change
+            if (messageType === 'text') {
+              const lowerText = textBody.toLowerCase().trim();
+              if (['menu', 'language', 'change language', 'bhasha', 'options'].includes(lowerText)) {
+                console.log(`User ${from} requested menu/language change.`);
+                try {
+                  await sendLanguageSelectionMenu(from);
+                } catch (err) {
+                  console.error('Error sending language menu:', err.message);
+                }
+                return res.status(200).send('EVENT_RECEIVED');
+              }
             }
 
             // Handle Language Selection Reply
@@ -260,7 +291,7 @@ app.post('/webhook', async (req, res) => {
               console.log(`User ${from} selected language: ${session.language}`);
             }
 
-            session.history.push({ role: 'user', content: textBody, timestamp: new Date().toISOString() });
+            session.history.push({ role: 'user', content: textBody, timestamp: new Date().toISOString(), messageId: messageId });
             session.unreadCount = (session.unreadCount || 0) + 1;
             session.markModified('history');
             await session.save();
@@ -299,7 +330,7 @@ app.post('/webhook', async (req, res) => {
             const isPaused = session.pausedUntil && session.pausedUntil > new Date();
 
             if (isAIEnabled && !isPaused) {
-              console.log('Generating automated response using OpenRouter AI...');
+              console.log('Generating automated response using Gemini AI...');
               try {
                 const aiReply = await generateAISessionReply(from, textBody);
                 console.log(`Generated Response: "${aiReply}"`);
@@ -330,7 +361,6 @@ app.post('/webhook', async (req, res) => {
           const status = value.statuses[0];
           console.log(`Message Status Update - ID: ${status.id}, Status: ${status.status}, Recipient: ${status.recipient_id}`);
           
-          // Update BroadcastRecipient if it exists
           try {
             const updateData = { status: status.status, updatedAt: Date.now() };
             if (status.errors && status.errors.length > 0) {
@@ -341,7 +371,6 @@ app.post('/webhook', async (req, res) => {
               updateData
             );
             
-            // Also update Session history if this message is part of a chat
             const sessionToUpdate = await Session.findOne({ "history.messageId": status.id });
             if (sessionToUpdate) {
               const historyItem = sessionToUpdate.history.find(h => h.messageId === status.id);
@@ -371,7 +400,6 @@ app.post('/webhook', async (req, res) => {
  * API ENDPOINTS FOR FRONTEND DASHBOARD
  */
 
-// 0. Register Admin Push Token
 app.post('/api/admin/push-token', async (req, res) => {
   try {
     await connectDB();
@@ -384,7 +412,6 @@ app.post('/api/admin/push-token', async (req, res) => {
   }
 });
 
-// 1. Get all active sessions
 app.get('/api/sessions', async (req, res) => {
   try {
     await connectDB();
@@ -403,7 +430,6 @@ app.get('/api/sessions', async (req, res) => {
   }
 });
 
-// 2. Get chat history for specific phone number
 app.get('/api/chats/:phone', async (req, res) => {
   try {
     await connectDB();
@@ -419,7 +445,6 @@ app.get('/api/chats/:phone', async (req, res) => {
       });
     }
 
-    // Reset unread count when chat is viewed
     if (session.unreadCount > 0) {
       session.unreadCount = 0;
       await session.save();
@@ -438,7 +463,6 @@ app.get('/api/chats/:phone', async (req, res) => {
   }
 });
 
-// 2.5 Update contact name
 app.post('/api/sessions/name', async (req, res) => {
   try {
     await connectDB();
@@ -458,7 +482,6 @@ app.post('/api/sessions/name', async (req, res) => {
   }
 });
 
-// 3. Pause AI for a specific phone number
 app.post('/api/pause', async (req, res) => {
   try {
     await connectDB();
@@ -480,7 +503,6 @@ app.post('/api/pause', async (req, res) => {
   }
 });
 
-// 4. Resume AI for a specific phone number
 app.post('/api/resume', async (req, res) => {
   try {
     await connectDB();
@@ -498,7 +520,6 @@ app.post('/api/resume', async (req, res) => {
   }
 });
 
-// 5. Toggle AI ON/OFF for a specific phone number
 app.post('/api/toggle-ai', async (req, res) => {
   try {
     await connectDB();
@@ -518,9 +539,6 @@ app.post('/api/toggle-ai', async (req, res) => {
   }
 });
 
-/**
- * API ENDPOINT TO SEND MESSAGES (POST /send-message)
- */
 app.post('/send-message', async (req, res) => {
   const { to, message } = req.body;
 
@@ -532,9 +550,7 @@ app.post('/send-message', async (req, res) => {
   
   try {
     await connectDB();
-    console.log(`[MANUAL SEND] DB Connected. Attempting to send WhatsApp message...`);
     const response = await sendWhatsAppTextMessage(to, message);
-    console.log(`[MANUAL SEND] Meta API Response:`, response);
     
     if (!response) {
       return res.status(400).json({ 
@@ -576,9 +592,6 @@ app.post('/send-message', async (req, res) => {
   }
 });
 
-/**
- * API ENDPOINT FOR MOBILE APP (POST /api/chats/:phone/reply)
- */
 app.post('/api/chats/:phone/reply', async (req, res) => {
   const { to, message } = req.body;
   const phone = req.params.phone || to;
@@ -586,13 +599,10 @@ app.post('/api/chats/:phone/reply', async (req, res) => {
   if (!phone || !message) {
     return res.status(400).json({ error: 'Please provide both phone number and message body.' });
   }
-
-  console.log(`[MOBILE MANUAL SEND] Request received. To: ${phone}, Message: ${message}`);
   
   try {
     await connectDB();
     const response = await sendWhatsAppTextMessage(phone, message);
-    console.log(`[MOBILE MANUAL SEND] Meta API Response:`, response);
     
     if (!response) {
       return res.status(400).json({ 
@@ -605,10 +615,7 @@ app.post('/api/chats/:phone/reply', async (req, res) => {
     if (!session) {
       session = new Session({ phone: phone, history: [{ role: 'system', content: systemInstruction }] });
     }
-    if (!session.history || session.history.length === 0) {
-      session.history = [{ role: 'system', content: systemInstruction }];
-    }
-
+    
     let metaMsgId = null;
     if (response.messages && response.messages.length > 0) metaMsgId = response.messages[0].id;
 
@@ -626,7 +633,6 @@ app.post('/api/chats/:phone/reply', async (req, res) => {
 
     res.status(200).json({ success: true, meta_response: response });
   } catch (error) {
-    console.error('Error sending message from mobile API:', error.response ? error.response.data : error.message);
     res.status(500).json({ 
       success: false, 
       error: error.response ? error.response.data : error.message 
@@ -634,9 +640,6 @@ app.post('/api/chats/:phone/reply', async (req, res) => {
   }
 });
 
-/**
- * Helper function to send text message via WhatsApp Cloud API
- */
 async function sendWhatsAppTextMessage(to, text) {
   const url = `https://graph.facebook.com/${META_API_VERSION}/${PHONE_NUMBER_ID}/messages`;
   
@@ -660,17 +663,11 @@ async function sendWhatsAppTextMessage(to, text) {
     const response = await axios.post(url, payload, { headers });
     return response.data;
   } catch (error) {
-    console.error('Error sending WhatsApp text message (EPIPE/Network Error):', error.message);
-    if (error.response && error.response.data) {
-      console.error('Meta API Error Details:', JSON.stringify(error.response.data));
-    }
-    return null; // Return null instead of throwing to prevent app crash
+    console.error('Error sending WhatsApp text message:', error.message);
+    return null;
   }
 }
 
-/**
- * Helper function to send Language Selection Interactive Menu
- */
 async function sendLanguageSelectionMenu(to) {
   const url = `https://graph.facebook.com/${META_API_VERSION}/${PHONE_NUMBER_ID}/messages`;
   
@@ -710,26 +707,25 @@ async function sendLanguageSelectionMenu(to) {
     const response = await axios.post(url, payload, { headers });
     return response.data;
   } catch (error) {
-    console.error('Error sending Language Selection Menu (EPIPE/Network Error):', error.message);
-    if (error.response && error.response.data) {
-      console.error('Meta API Error Details:', JSON.stringify(error.response.data));
-    }
+    console.error('Error sending Language Selection Menu:', error.message);
     return null;
   }
 }
 
 /**
- * Helper function to generate response using OpenRouter AI with session memory
+ * Helper function to generate response using Gemini AI with session memory
  */
 async function generateAISessionReply(userId, userMessage) {
-  if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === 'your_openrouter_api_key_here') {
-    console.log('OpenRouter key not configured. Using fallback response.');
-    return "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
+  const fallbackMessage = "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
+
+  if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
+    console.log('Gemini key not configured. Using fallback response.');
+    return fallbackMessage;
   }
 
   const session = await Session.findOne({ phone: userId });
   if (!session || !session.history) {
-    return "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
+    return fallbackMessage;
   }
 
   // Keep last 20 messages + system instruction to avoid token limits
@@ -743,9 +739,6 @@ async function generateAISessionReply(userId, userMessage) {
 
   // Inject language preference if set
   if (session.language) {
-    // We append it to the main system instruction (history[0]) to avoid 400 Bad Request from models
-    // that don't allow system messages at the end of the array.
-    // Create a deep copy of history[0] to avoid modifying the DB accidentally
     history[0] = {
       role: 'system',
       content: history[0].content + `\n\nCRITICAL INSTRUCTION: The user has selected to converse in ${session.language}. You MUST reply ONLY in ${session.language}. Do not use any other language.`
@@ -753,42 +746,41 @@ async function generateAISessionReply(userId, userMessage) {
   }
 
   try {
-    const url = 'https://openrouter.ai/api/v1/chat/completions';
-    const payload1 = {
-      model: OPENROUTER_MODEL,
-      messages: history
-    };
-    const payload2 = { 
-      model: process.env.OPENROUTER_MODEL_2 || 'google/gemma-4-26b-a4b-it:free', 
-      messages: history 
-    };
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'HTTP-Referer': 'https://digital-orra-api.vercel.app',
-      'X-Title': 'Digital ORRA WhatsApp Bot'
-    };
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      systemInstruction: history[0].content
+    });
 
-    const req1 = axios.post(url, payload1, { headers, timeout: 30000 });
-    const req2 = axios.post(url, payload2, { headers, timeout: 30000 });
-
-    const response = await Promise.any([req1, req2]);
-    
-    if (response.data && response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
-      const aiReply = response.data.choices[0].message.content.trim();
-      
-      session.history.push({ role: 'assistant', content: aiReply, timestamp: new Date().toISOString() });
-      session.markModified('history');
-      await session.save();
-
-      return aiReply;
-    } else {
-      console.error('Unexpected OpenRouter response structure:', JSON.stringify(response.data));
-      return "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
+    // Map history to Gemini format (skip system instruction as it's passed above)
+    let geminiHistory = [];
+    const nonSystemMsg = history.filter(msg => msg.role !== 'system');
+    for (let msg of nonSystemMsg) {
+      const mappedRole = msg.role === 'assistant' ? 'model' : 'user';
+      if (geminiHistory.length === 0) {
+        geminiHistory.push({ role: mappedRole, parts: [{ text: msg.content }] });
+      } else {
+        let lastMsg = geminiHistory[geminiHistory.length - 1];
+        if (lastMsg.role === mappedRole) {
+          lastMsg.parts[0].text += '\n\n' + msg.content;
+        } else {
+          geminiHistory.push({ role: mappedRole, parts: [{ text: msg.content }] });
+        }
+      }
     }
-  } catch (error) {
-    console.error(`Error calling OpenRouter API for session ${userId}:`, error.response ? error.response.data : error.message);
-    return "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
+
+    const contents = geminiHistory;
+    const result = await model.generateContent({ contents });
+    const aiReply = result.response.text().trim();
+    
+    session.history.push({ role: 'assistant', content: aiReply, timestamp: new Date().toISOString() });
+    session.markModified('history');
+    await session.save();
+
+    return aiReply;
+  } catch (geminiError) {
+    console.error(`Error calling Gemini API for session ${userId}:`, geminiError.message || geminiError);
+    return fallbackMessage;
   }
 }
 
