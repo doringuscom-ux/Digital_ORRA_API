@@ -113,10 +113,10 @@ Your primary goal is to help users find the best solution for their business or 
   systemInstruction = process.env.SYSTEM_INSTRUCTION || '';
 }
 
-if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your_gemini_api_key_here') {
-  console.log(`Initializing Gemini AI engine`);
+if (process.env.OPENROUTER_API_KEY) {
+  console.log(`Initializing OpenRouter AI engine`);
 } else {
-  console.warn('\n⚠️ WARNING: GEMINI_API_KEY is not set in .env. The chatbot will use fallback messages instead of AI replies.\n');
+  console.warn('\n⚠️ WARNING: OPENROUTER_API_KEY is not set in .env. The chatbot will use fallback messages instead of AI replies.\n');
 }
 
 // Serve static frontend files
@@ -330,7 +330,7 @@ app.post('/webhook', async (req, res) => {
             const isPaused = session.pausedUntil && session.pausedUntil > new Date();
 
             if (isAIEnabled && !isPaused) {
-              console.log('Generating automated response using Gemini AI...');
+              console.log('Generating automated response using OpenRouter AI...');
               try {
                 const aiReply = await generateAISessionReply(from, textBody);
                 console.log(`Generated Response: "${aiReply}"`);
@@ -713,13 +713,13 @@ async function sendLanguageSelectionMenu(to) {
 }
 
 /**
- * Helper function to generate response using Gemini AI with session memory
+ * Helper function to generate response using OpenRouter AI with session memory
  */
 async function generateAISessionReply(userId, userMessage) {
   const fallbackMessage = "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
 
-  if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your_gemini_api_key_here') {
-    console.log('Gemini key not configured. Using fallback response.');
+  if (!process.env.OPENROUTER_API_KEY) {
+    console.log('OpenRouter key not configured. Using fallback response.');
     return fallbackMessage;
   }
 
@@ -746,40 +746,36 @@ async function generateAISessionReply(userId, userMessage) {
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
-      systemInstruction: history[0].content
-    });
+    const openRouterMessages = history.map(msg => ({
+      role: msg.role === 'assistant' ? 'assistant' : (msg.role === 'system' ? 'system' : 'user'),
+      content: msg.content
+    }));
 
-    // Map history to Gemini format (skip system instruction as it's passed above)
-    let geminiHistory = [];
-    const nonSystemMsg = history.filter(msg => msg.role !== 'system');
-    for (let msg of nonSystemMsg) {
-      const mappedRole = msg.role === 'assistant' ? 'model' : 'user';
-      if (geminiHistory.length === 0) {
-        geminiHistory.push({ role: mappedRole, parts: [{ text: msg.content }] });
-      } else {
-        let lastMsg = geminiHistory[geminiHistory.length - 1];
-        if (lastMsg.role === mappedRole) {
-          lastMsg.parts[0].text += '\n\n' + msg.content;
-        } else {
-          geminiHistory.push({ role: mappedRole, parts: [{ text: msg.content }] });
+    const response = await axios.post(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        model: process.env.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free',
+        messages: openRouterMessages,
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://digitalorra.com',
+          'X-Title': 'Digital ORRA WhatsApp Bot'
         }
       }
-    }
+    );
 
-    const contents = geminiHistory;
-    const result = await model.generateContent({ contents });
-    const aiReply = result.response.text().trim();
+    const aiReply = response.data.choices[0].message.content.trim();
     
     session.history.push({ role: 'assistant', content: aiReply, timestamp: new Date().toISOString() });
     session.markModified('history');
     await session.save();
 
     return aiReply;
-  } catch (geminiError) {
-    console.error(`Error calling Gemini API for session ${userId}:`, geminiError.message || geminiError);
+  } catch (error) {
+    console.error(`Error calling OpenRouter API for session ${userId}:`, error.response ? error.response.data : error.message);
     return fallbackMessage;
   }
 }
