@@ -776,7 +776,28 @@ async function generateAISessionReply(userId, userMessage) {
     return aiReply;
   } catch (error) {
     console.error(`Error calling OpenRouter API for session ${userId}:`, error.response ? error.response.data : error.message);
-    return fallbackMessage;
+    console.log(`OpenRouter failed, falling back to Gemini API...`);
+    
+    try {
+      if (!process.env.GEMINI_API_KEY) throw new Error('No GEMINI_API_KEY available.');
+
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      
+      const geminiPrompt = history.map(msg => `${msg.role === 'assistant' ? 'Assistant' : (msg.role === 'system' ? 'System' : 'User')}: ${msg.content}`).join('\\n') + '\\nAssistant: ';
+      
+      const result = await model.generateContent(geminiPrompt);
+      const aiReply = result.response.text().trim();
+      
+      session.history.push({ role: 'assistant', content: aiReply, timestamp: new Date().toISOString() });
+      session.markModified('history');
+      await session.save();
+      
+      return aiReply;
+    } catch (geminiError) {
+      console.error(`Error calling Gemini API for session ${userId}:`, geminiError.message);
+      return fallbackMessage;
+    }
   }
 }
 
