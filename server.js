@@ -741,7 +741,7 @@ async function generateAISessionReply(userId, userMessage) {
   if (session.language) {
     history[0] = {
       role: 'system',
-      content: history[0].content + `\n\nCRITICAL INSTRUCTION: The user has selected to converse in ${session.language}. You MUST reply ONLY in ${session.language}. Do not use any other language.`
+      content: history[0].content + `\n\nCRITICAL INSTRUCTION: The user has selected ${session.language} as their preferred language. You MUST reply fluently in ${session.language}. If the user writes in Roman (English) script, reply in Roman ${session.language}. If they write in native script, use native script. Do not mix other languages unnecessarily.`
     };
   }
 
