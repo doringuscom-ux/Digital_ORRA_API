@@ -718,8 +718,8 @@ async function sendLanguageSelectionMenu(to) {
 async function generateAISessionReply(userId, userMessage) {
   const fallbackMessage = "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
 
-  if (!process.env.OPENROUTER_API_KEY) {
-    console.log('OpenRouter key not configured. Using fallback response.');
+  if (!process.env.GROQ_API_KEY) {
+    console.log('Groq API key not configured. Using fallback response.');
     return fallbackMessage;
   }
 
@@ -746,58 +746,40 @@ async function generateAISessionReply(userId, userMessage) {
   }
 
   try {
-    const openRouterMessages = history.map(msg => ({
+    const groqMessages = history.map(msg => ({
       role: msg.role === 'assistant' ? 'assistant' : (msg.role === 'system' ? 'system' : 'user'),
       content: msg.content
     }));
 
     const response = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
+      'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: process.env.OPENROUTER_MODEL || 'google/gemma-4-31b-it:free',
-        messages: openRouterMessages,
+        model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
+        messages: groqMessages,
       },
       {
         headers: {
-          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://digitalorra.com',
-          'X-Title': 'Digital ORRA WhatsApp Bot'
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
         }
       }
     );
 
     const aiReply = response.data.choices[0].message.content.trim();
     
-    session.history.push({ role: 'assistant', content: aiReply, timestamp: new Date().toISOString() });
-    session.markModified('history');
-    await session.save();
+    await Session.findOneAndUpdate(
+      { phone: userId },
+      { 
+        $push: { 
+          history: { role: 'assistant', content: aiReply, timestamp: new Date().toISOString() } 
+        } 
+      }
+    );
 
     return aiReply;
   } catch (error) {
-    console.error(`Error calling OpenRouter API for session ${userId}:`, error.response ? error.response.data : error.message);
-    console.log(`OpenRouter failed, falling back to Gemini API...`);
-    
-    try {
-      if (!process.env.GEMINI_API_KEY) throw new Error('No GEMINI_API_KEY available.');
-
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-      
-      const geminiPrompt = history.map(msg => `${msg.role === 'assistant' ? 'Assistant' : (msg.role === 'system' ? 'System' : 'User')}: ${msg.content}`).join('\\n') + '\\nAssistant: ';
-      
-      const result = await model.generateContent(geminiPrompt);
-      const aiReply = result.response.text().trim();
-      
-      session.history.push({ role: 'assistant', content: aiReply, timestamp: new Date().toISOString() });
-      session.markModified('history');
-      await session.save();
-      
-      return aiReply;
-    } catch (geminiError) {
-      console.error(`Error calling Gemini API for session ${userId}:`, geminiError.message);
-      return fallbackMessage;
-    }
+    console.error(`Error calling Groq API for session ${userId}:`, error.response ? error.response.data : error.message);
+    return fallbackMessage;
   }
 }
 
