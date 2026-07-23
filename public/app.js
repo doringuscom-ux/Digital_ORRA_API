@@ -4,6 +4,20 @@ let sessionsData = [];
 let pollingInterval = null;
 let countdownInterval = null;
 
+let apiPassword = localStorage.getItem('apiPassword') || '';
+
+// Override fetch to include password
+const originalFetch = window.fetch;
+window.fetch = async function () {
+  let [resource, config] = arguments;
+  if (!config) config = {};
+  if (!config.headers) config.headers = {};
+  if (apiPassword) {
+    config.headers['x-api-password'] = apiPassword;
+  }
+  return originalFetch(resource, config);
+};
+
 // DOM Elements
 const sessionsList = document.getElementById('sessionsList');
 const messagesContainer = document.getElementById('messagesContainer');
@@ -17,12 +31,62 @@ const chatInputArea = document.getElementById('chatInputArea');
 const messageForm = document.getElementById('messageForm');
 const messageInput = document.getElementById('messageInput');
 
+// Login Elements
+const loginModal = document.getElementById('loginModal');
+const loginForm = document.getElementById('loginForm');
+const apiPasswordInput = document.getElementById('apiPasswordInput');
+const loginError = document.getElementById('loginError');
+
+function startApp() {
+  fetchSessions();
+  if (pollingInterval) clearInterval(pollingInterval);
+  pollingInterval = setInterval(fetchSessions, 3000);
+}
+
 // Initialize Dashboard
 document.addEventListener('DOMContentLoaded', () => {
-  fetchSessions();
-  
-  // Start polling session lists every 3 seconds
-  pollingInterval = setInterval(fetchSessions, 3000);
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pwd = apiPasswordInput.value.trim();
+      if (!pwd) return;
+      
+      apiPassword = pwd;
+      
+      try {
+        const response = await fetch('/api/sessions');
+        if (response.ok) {
+          localStorage.setItem('apiPassword', apiPassword);
+          if (loginModal) loginModal.style.display = 'none';
+          if (loginError) loginError.style.display = 'none';
+          startApp();
+        } else {
+          if (loginError) loginError.style.display = 'block';
+          apiPassword = '';
+        }
+      } catch (err) {
+        if (loginError) {
+          loginError.innerText = 'Network Error';
+          loginError.style.display = 'block';
+        }
+      }
+    });
+  }
+
+  if (apiPassword) {
+    fetch('/api/sessions').then(res => {
+      if (res.ok) {
+        if (loginModal) loginModal.style.display = 'none';
+        startApp();
+      } else {
+        if (loginModal) loginModal.style.display = 'flex';
+        localStorage.removeItem('apiPassword');
+        apiPassword = '';
+      }
+    });
+  } else {
+    if (loginModal) loginModal.style.display = 'flex';
+  }
 
   // Setup Event Listeners for Pause Buttons
   document.querySelectorAll('.btn-pause').forEach(button => {

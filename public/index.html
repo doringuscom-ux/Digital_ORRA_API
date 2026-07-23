@@ -10,6 +10,22 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Login Modal -->
+  <div id="loginModal" class="login-overlay" style="display: none;">
+    <div class="login-box">
+      <div class="brand" style="justify-content: center; margin-bottom: 20px;">
+        <div class="logo-dot"></div>
+        <h2>Digital ORRA</h2>
+      </div>
+      <h3>Control Center Login</h3>
+      <form id="loginForm">
+        <input type="password" id="apiPasswordInput" placeholder="Enter API Password" required>
+        <button type="submit" class="btn btn-send" style="width: 100%; margin-top: 15px; padding: 10px; border-radius: 6px; justify-content: center;">Login</button>
+      </form>
+      <div id="loginError" style="color: #ff5c5c; margin-top: 10px; display: none; text-align: center;">Invalid Password</div>
+    </div>
+  </div>
+
   <div class="app-container">
     <!-- Sidebar for Sessions List -->
     <aside class="sidebar">

@@ -542,3 +542,47 @@ input:checked + .slider:before {
   50% { transform: translateY(-10px); }
   100% { transform: translateY(0px); }
 }
+
+/* Login Modal */
+.login-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: var(--bg-gradient);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.login-box {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  padding: 40px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  width: 100%;
+  max-width: 400px;
+}
+
+.login-box h3 {
+  text-align: center;
+  margin-bottom: 20px;
+  color: var(--text-primary);
+}
+
+.login-box input {
+  width: 100%;
+  padding: 12px;
+  background: rgba(13, 17, 23, 0.8);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  outline: none;
+}
+
+.login-box input:focus {
+  border-color: var(--accent-blue);
+}
