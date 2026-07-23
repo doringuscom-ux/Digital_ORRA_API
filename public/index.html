@@ -26,6 +26,27 @@
     </div>
   </div>
 
+  <!-- Knowledge Base Modal -->
+  <div id="kbModal" class="login-overlay" style="display: none;">
+    <div class="login-box" style="max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h3>AI Knowledge Base (Training)</h3>
+        <button id="btnCloseKB" style="background: none; border: none; color: var(--text-primary); font-size: 1.5rem; cursor: pointer;">&times;</button>
+      </div>
+      
+      <form id="kbForm" style="margin-bottom: 20px;">
+        <input type="text" id="kbQuestion" placeholder="User's Question (e.g. Refund policy?)" required style="margin-bottom: 10px;">
+        <textarea id="kbAnswer" placeholder="AI's Answer (e.g. We provide a 7-day refund policy...)" required style="width: 100%; padding: 12px; background: rgba(13, 17, 23, 0.8); border: 1px solid var(--glass-border); color: var(--text-primary); border-radius: 6px; outline: none; resize: vertical; min-height: 80px; font-family: 'Outfit', sans-serif;"></textarea>
+        <button type="submit" class="btn btn-send" style="width: 100%; margin-top: 10px; padding: 10px; border-radius: 6px; justify-content: center; background: var(--accent-green);">Add to Knowledge Base</button>
+      </form>
+      
+      <h4>Current Knowledge</h4>
+      <div id="kbList" style="margin-top: 15px; display: flex; flex-direction: column; gap: 10px;">
+        <div class="loading-placeholder">Loading...</div>
+      </div>
+    </div>
+  </div>
+
   <div class="app-container">
     <!-- Sidebar for Sessions List -->
     <aside class="sidebar">
@@ -35,6 +56,7 @@
           <h2>Digital ORRA</h2>
         </div>
         <p class="subtitle">Bot Control Dashboard</p>
+        <button id="btnOpenKB" class="btn btn-kb" style="width: 100%; margin-top: 15px; padding: 8px; border-radius: 4px; background: var(--accent-green); color: #fff; border: none; cursor: pointer;">📚 Knowledge Base / Training</button>
       </div>
       <div class="sessions-list" id="sessionsList">
         <!-- Rendered dynamically by app.js -->

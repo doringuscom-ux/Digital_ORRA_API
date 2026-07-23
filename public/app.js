@@ -392,3 +392,122 @@ async function handleSendMessage(e) {
 function scrollToBottom() {
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
+
+// --- Knowledge Base Logic ---
+const btnOpenKB = document.getElementById('btnOpenKB');
+const btnCloseKB = document.getElementById('btnCloseKB');
+const kbModal = document.getElementById('kbModal');
+const kbForm = document.getElementById('kbForm');
+const kbList = document.getElementById('kbList');
+
+let editingKbId = null;
+
+if (btnOpenKB) {
+  btnOpenKB.addEventListener('click', () => {
+    kbModal.style.display = 'flex';
+    fetchKnowledgeBase();
+  });
+}
+if (btnCloseKB) {
+  btnCloseKB.addEventListener('click', () => {
+    kbModal.style.display = 'none';
+  });
+}
+
+async function fetchKnowledgeBase() {
+  try {
+    const res = await fetch('/api/knowledge');
+    const data = await res.json();
+    renderKnowledgeBase(data);
+  } catch (e) {
+    console.error('Failed to fetch KB');
+  }
+}
+
+function renderKnowledgeBase(data) {
+  if (!data || data.length === 0) {
+    kbList.innerHTML = '<div class="empty-state">No knowledge base items found.</div>';
+    return;
+  }
+  kbList.innerHTML = '';
+  data.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'kb-item';
+    
+    // Escape quotes to safely pass to inline onclick handler
+    const safeQ = item.question.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const safeA = item.answer.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    
+    div.innerHTML = `
+      <p><strong>Q:</strong> ${item.question}</p>
+      <p><strong>A:</strong> ${item.answer}</p>
+      <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 5px;">
+        <button class="btn-edit-kb" style="background: var(--accent-blue); color: #fff; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 0.8rem;" onclick="editKnowledge('${item._id}', '${safeQ}', '${safeA}')">Edit</button>
+        <button class="btn-delete-kb" style="background: #ff5c5c; color: #fff; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 0.8rem; position: static;" onclick="deleteKnowledge('${item._id}')">Delete</button>
+      </div>
+    `;
+    kbList.appendChild(div);
+  });
+}
+
+window.editKnowledge = function(id, q, a) {
+  editingKbId = id;
+  document.getElementById('kbQuestion').value = q;
+  document.getElementById('kbAnswer').value = a;
+  
+  const submitBtn = kbForm.querySelector('button[type="submit"]');
+  submitBtn.innerText = 'Update Knowledge Base';
+  submitBtn.style.background = 'var(--accent-blue)';
+  
+  // Scroll up to form
+  document.getElementById('kbModal').querySelector('.login-box').scrollTop = 0;
+};
+
+if (kbForm) {
+  kbForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const question = document.getElementById('kbQuestion').value;
+    const answer = document.getElementById('kbAnswer').value;
+    
+    try {
+      let res;
+      if (editingKbId) {
+        res = await fetch(`/api/knowledge/${editingKbId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, answer })
+        });
+      } else {
+        res = await fetch('/api/knowledge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, answer })
+        });
+      }
+      
+      if (res.ok) {
+        document.getElementById('kbQuestion').value = '';
+        document.getElementById('kbAnswer').value = '';
+        editingKbId = null;
+        
+        const submitBtn = kbForm.querySelector('button[type="submit"]');
+        submitBtn.innerText = 'Add to Knowledge Base';
+        submitBtn.style.background = 'var(--accent-green)';
+        
+        fetchKnowledgeBase();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+window.deleteKnowledge = async function(id) {
+  if (!confirm('Are you sure you want to delete this?')) return;
+  try {
+    const res = await fetch(`/api/knowledge/${id}`, { method: 'DELETE' });
+    if (res.ok) fetchKnowledgeBase();
+  } catch (e) {
+    console.error(e);
+  }
+};

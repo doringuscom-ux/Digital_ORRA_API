@@ -23,6 +23,7 @@ const AdminToken = require('./models/AdminToken');
 const BroadcastJob = require('./models/BroadcastJob');
 const BroadcastRecipient = require('./models/BroadcastRecipient');
 const AppConfig = require('./models/AppConfig');
+const KnowledgeBase = require('./models/KnowledgeBase');
 
 const app = express();
 app.use(cors());
@@ -82,7 +83,8 @@ Your primary goal is to help users find the best solution for their business or 
 - **Be Human & Natural**: Do NOT sound like an AI or a bot. Converse like a warm, supportive, and understanding person. Avoid robotic lists or repeating template texts in every single message.
 - **Language**: Converse comfortably in Hinglish (mixed Hindi and English, code-switching naturally, e.g. "Haan ji, bilkul! Hamare paas bahut accha video editing course hai...", "Aap abhi kya kar rahe hain?").
 - **Stay on Topic (Immediate Context)**: Always prioritize and analyze the last 1-2 messages in the chat history. Make sure you reply directly to what the user just asked/said in their most recent message. Do not drift away from the immediate topic or bring up unrelated details unless requested. Keep the talk easy to follow and relevant.
-- **Message Length**: Keep your responses short and interactive (2-3 sentences max). Instead of sending a massive block of text, share a bit of information and ask a question to keep them talking.
+- **Message Length (CRITICAL)**: Keep your responses EXTREMELY short (1-2 sentences maximum). Do NOT send long paragraphs. Talk exactly like a busy but polite human on WhatsApp.
+- **Always Ask Questions**: Never end a message without naturally moving the conversation forward or asking for their details (name/number/requirements).
 
 ### SALES & COUNSELING GUIDELINES:
 1. **Welcome & Qualify**:
@@ -103,8 +105,21 @@ Your primary goal is to help users find the best solution for their business or 
    - If they are a business owner looking for growth, recommend our services or advanced digital marketing courses.
    - If they want to learn, recommend our premium programs (e.g. Digital Marketing with AI, Full Stack Web Development) because they offer internship & placement assistance.
 
-5. **Closing / Concluding**:
-   - When appropriate (after sharing details, or once they share their contact number), conclude with a variation of: "Thank you for your interest in Digital ORRA. Our team will contact you shortly with complete details, fees, batch timings, and enrollment information."
+5. **Handling Contact Information (CRITICAL)**:
+   - Our EXACT Contact Details are:
+     - **Phone Number:** +91 6280458005
+     - **Address:** SCO 19, Sector 11, Panchkula, Haryana 134109
+   - If the user asks for our contact number or address, ALWAYS provide ONLY the exact details mentioned above.
+   - NEVER invent, guess, or provide any fake/placeholder numbers or addresses.
+   - You can also politely add: "Aap is number par call ya message kar sakte hain, ya apna number bata dijiye aur hamari team aapko call kar legi."
+
+6. **Handling Unknown Questions (CRITICAL)**:
+   - If the user asks a question and you DO NOT know the exact answer from your knowledge base, DO NOT ask them to wait.
+   - DO NOT say "I will check with my team" or "Let me confirm".
+   - INSTEAD, naturally deflect by saying: "Sir/Ma'am iski puri detail ke liye aap ek baar is number (+91 6280458005) par call kar lijiye, ya apna number bata dijiye hum call kar lenge." This keeps the human illusion perfect.
+
+7. **Closing / Concluding**:
+   - When appropriate (after sharing details, or once they share their contact number), conclude with a variation of: "Thank you for your interest in Digital ORRA. Our team will contact you shortly with complete details."
 `;
 
   systemInstruction = flowInstructions + servicesText + coursesText;
@@ -539,6 +554,57 @@ app.post('/api/toggle-ai', async (req, res) => {
   }
 });
 
+// --- Knowledge Base Endpoints ---
+app.get('/api/knowledge', async (req, res) => {
+  try {
+    await connectDB();
+    const knowledge = await KnowledgeBase.find({}).sort({ createdAt: -1 });
+    res.json(knowledge);
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.post('/api/knowledge', async (req, res) => {
+  try {
+    await connectDB();
+    const { question, answer } = req.body;
+    if (!question || !answer) return res.status(400).json({ error: 'Question and answer required' });
+    const newKb = new KnowledgeBase({ question, answer });
+    await newKb.save();
+    res.json({ success: true, item: newKb });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.put('/api/knowledge/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const { question, answer } = req.body;
+    if (!question || !answer) return res.status(400).json({ error: 'Question and answer required' });
+    const updatedKb = await KnowledgeBase.findByIdAndUpdate(
+      req.params.id,
+      { question, answer },
+      { new: true }
+    );
+    res.json({ success: true, item: updatedKb });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.delete('/api/knowledge/:id', async (req, res) => {
+  try {
+    await connectDB();
+    await KnowledgeBase.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+// --------------------------------
+
 app.post('/send-message', async (req, res) => {
   const { to, message } = req.body;
 
@@ -743,6 +809,21 @@ async function generateAISessionReply(userId, userMessage) {
       role: 'system',
       content: history[0].content + `\n\nCRITICAL INSTRUCTION: The user has selected ${session.language} as their preferred language. You MUST reply fluently in ${session.language}. If the user writes in Roman (English) script, reply in Roman ${session.language}. If they write in native script, use native script. Do not mix other languages unnecessarily.`
     };
+  }
+
+  // Inject Knowledge Base
+  try {
+    const kbItems = await KnowledgeBase.find({});
+    if (kbItems && kbItems.length > 0) {
+      let kbText = '\n\n=== KNOWLEDGE BASE (Use this to answer questions) ===\n';
+      kbItems.forEach((kb, i) => {
+        kbText += `Q${i + 1}: ${kb.question}\nA: ${kb.answer}\n\n`;
+      });
+      kbText += '=====================================================\n';
+      history[0].content += kbText;
+    }
+  } catch (err) {
+    console.error('Error fetching Knowledge Base:', err);
   }
 
   try {
