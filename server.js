@@ -826,6 +826,12 @@ async function generateAISessionReply(userId, userMessage) {
     console.error('Error fetching Knowledge Base:', err);
   }
 
+  // FINAL CRITICAL SAFEGUARD: Prevent AI Hallucinations for Contact Info
+  history[0].content += `\n\nFINAL CRITICAL RULE: Under NO circumstances should you invent, guess, or use placeholder/fake numbers (e.g., 98765-43210, 1234567890) or fake addresses (e.g., Delhi, Mumbai). Whenever the user asks for a contact number, mobile number, or address, you MUST ONLY provide our exact details:
+- Phone / Mobile: +91 6280458005
+- Address: SCO 19, Sector 11, Panchkula, Haryana 134109
+Do not translate the address or number layout into generic ones.`;
+
   try {
     const groqMessages = history.map(msg => ({
       role: msg.role === 'assistant' ? 'assistant' : (msg.role === 'system' ? 'system' : 'user'),
