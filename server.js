@@ -128,10 +128,12 @@ Your primary goal is to help users find the best solution for their business or 
   systemInstruction = process.env.SYSTEM_INSTRUCTION || '';
 }
 
-if (process.env.OPENROUTER_API_KEY) {
-  console.log(`Initializing OpenRouter AI engine`);
+if (process.env.GEMINI_API_KEY) {
+  console.log(`Initializing Google Gemini AI engine (${process.env.GEMINI_MODEL || 'gemini-3.6-flash'}) with Paid Tier`);
+} else if (process.env.GROQ_API_KEY) {
+  console.log(`Initializing Groq AI engine backup`);
 } else {
-  console.warn('\n⚠️ WARNING: OPENROUTER_API_KEY is not set in .env. The chatbot will use fallback messages instead of AI replies.\n');
+  console.warn('\n⚠️ WARNING: Neither GEMINI_API_KEY nor GROQ_API_KEY is set in .env. The chatbot will use fallback messages instead of AI replies.\n');
 }
 
 // Serve static frontend files
@@ -345,7 +347,7 @@ app.post('/webhook', async (req, res) => {
             const isPaused = session.pausedUntil && session.pausedUntil > new Date();
 
             if (isAIEnabled && !isPaused) {
-              console.log('Generating automated response using OpenRouter AI...');
+              console.log('Generating automated response using Google Gemini AI...');
               try {
                 const aiReply = await generateAISessionReply(from, textBody);
                 console.log(`Generated Response: "${aiReply}"`);
@@ -779,15 +781,10 @@ async function sendLanguageSelectionMenu(to) {
 }
 
 /**
- * Helper function to generate response using OpenRouter AI with session memory
+ * Helper function to generate response using Google Gemini AI (Paid Tier) with Groq Backup
  */
 async function generateAISessionReply(userId, userMessage) {
   const fallbackMessage = "Thank you for your message! Our AI is taking a moment to process. Please leave your requirement details and a team member will reach out to you shortly.";
-
-  if (!process.env.GROQ_API_KEY) {
-    console.log('Groq API key not configured. Using fallback response.');
-    return fallbackMessage;
-  }
 
   const session = await Session.findOne({ phone: userId });
   if (!session || !session.history) {
@@ -832,42 +829,83 @@ async function generateAISessionReply(userId, userMessage) {
 - Address: SCO 19, Sector 11, Panchkula, Haryana 134109
 Do not translate the address or number layout into generic ones.`;
 
-  try {
-    const groqMessages = history.map(msg => ({
-      role: msg.role === 'assistant' ? 'assistant' : (msg.role === 'system' ? 'system' : 'user'),
-      content: msg.content
-    }));
+  // 1. PRIMARY ENGINE: Google Gemini AI (Paid Prepay Tier)
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+      const systemText = history[0] ? history[0].content : '';
+      
+      // Convert history to Gemini contents format
+      const geminiContents = [];
+      for (let i = 1; i < history.length; i++) {
+        const item = history[i];
+        geminiContents.push({
+          role: item.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: item.content || '' }]
+        });
+      }
 
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
-        messages: groqMessages,
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
+      const geminiPayload = {
+        system_instruction: {
+          parts: [{ text: systemText }]
+        },
+        contents: geminiContents,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1000
         }
-      }
-    );
+      };
 
-    const aiReply = response.data.choices[0].message.content.trim();
-    
-    await Session.findOneAndUpdate(
-      { phone: userId },
-      { 
-        $push: { 
-          history: { role: 'assistant', content: aiReply, timestamp: new Date().toISOString() } 
-        } 
-      }
-    );
+      const geminiRes = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`,
+        geminiPayload,
+        {
+          headers: {
+            'x-goog-api-key': process.env.GEMINI_API_KEY,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
 
-    return aiReply;
-  } catch (error) {
-    console.error(`Error calling Groq API for session ${userId}:`, error.response ? error.response.data : error.message);
-    return fallbackMessage;
+      if (geminiRes.data && geminiRes.data.candidates && geminiRes.data.candidates[0]?.content?.parts[0]?.text) {
+        const aiReply = geminiRes.data.candidates[0].content.parts[0].text.trim();
+        return aiReply;
+      }
+    } catch (geminiError) {
+      console.error('Gemini API Error, attempting Groq fallback:', geminiError.response ? geminiError.response.data : geminiError.message);
+    }
   }
+
+  // 2. BACKUP ENGINE: Groq AI
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const groqMessages = history.map(msg => ({
+        role: msg.role === 'assistant' ? 'assistant' : (msg.role === 'system' ? 'system' : 'user'),
+        content: msg.content
+      }));
+
+      const groqRes = await axios.post(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          model: 'qwen/qwen3.8-27b',
+          messages: groqMessages,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const aiReply = groqRes.data.choices[0].message.content.trim();
+      return aiReply;
+    } catch (groqError) {
+      console.error('Groq API Backup Error:', groqError.response ? groqError.response.data : groqError.message);
+    }
+  }
+
+  return fallbackMessage;
 }
 
 // 6. Get all approved WhatsApp Message Templates
