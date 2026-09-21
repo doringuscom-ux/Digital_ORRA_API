@@ -47,6 +47,45 @@
     </div>
   </div>
 
+  <!-- Bot Welcome Flow Builder Modal -->
+  <div id="botFlowModal" class="login-overlay" style="display: none;">
+    <div class="login-box" style="max-width: 780px; width: 95%; max-height: 90vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid var(--glass-border); padding-bottom: 12px;">
+        <div>
+          <h3 style="font-size: 1.25rem; font-weight: 600; display: flex; align-items: center; gap: 8px;">🤖 Bot Welcome Flow Builder</h3>
+          <p style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 3px;">Configure your custom first 4-5 onboarding messages before AI takes over</p>
+        </div>
+        <button id="btnCloseBotFlow" style="background: none; border: none; color: var(--text-primary); font-size: 1.6rem; cursor: pointer; padding: 4px 8px;">&times;</button>
+      </div>
+
+      <!-- Master Toggle & Info -->
+      <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(22, 27, 34, 0.9); padding: 14px 18px; border-radius: 8px; border: 1px solid var(--glass-border); margin-bottom: 20px;">
+        <div>
+          <div style="font-weight: 600; font-size: 0.95rem;">Enable Welcome Flow</div>
+          <div style="font-size: 0.78rem; color: var(--text-secondary);">When active, new users go through these 4-5 steps first, then Gemini AI takes over.</div>
+        </div>
+        <label class="switch" style="margin-left: 15px;">
+          <input type="checkbox" id="flowToggleCheckbox" checked>
+          <span class="slider round"></span>
+        </label>
+      </div>
+
+      <!-- Flow Steps List Container -->
+      <div id="flowStepsContainer" style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 20px;">
+        <div class="loading-placeholder">Loading flow steps...</div>
+      </div>
+
+      <!-- Bottom Action Controls -->
+      <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--glass-border); padding-top: 15px; margin-top: 15px; flex-wrap: wrap; gap: 12px;">
+        <button id="btnResetFlow" type="button" class="btn-flow-reset">↺ Reset to Default Flow</button>
+        <div style="display: flex; gap: 14px; align-items: center;">
+          <span id="flowSaveStatus" style="font-size: 0.88rem; color: var(--accent-green); font-weight: 500; display: none;">Saved successfully! ✓</span>
+          <button id="btnSaveFlow" type="button" class="btn-flow-save">💾 Save Flow Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="app-container">
     <!-- Sidebar for Sessions List -->
     <aside class="sidebar">
@@ -56,7 +95,8 @@
           <h2>Digital ORRA</h2>
         </div>
         <p class="subtitle">Bot Control Dashboard</p>
-        <button id="btnOpenKB" class="btn btn-kb" style="width: 100%; margin-top: 15px; padding: 8px; border-radius: 4px; background: var(--accent-green); color: #fff; border: none; cursor: pointer;">📚 Knowledge Base / Training</button>
+        <button id="btnOpenBotFlow" class="btn" style="width: 100%; margin-top: 15px; padding: 9px; border-radius: 6px; background: var(--accent-blue); color: #fff; border: none; cursor: pointer; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px;">🤖 Welcome Flow (First 5 Msgs)</button>
+        <button id="btnOpenKB" class="btn btn-kb" style="width: 100%; margin-top: 8px; padding: 8px; border-radius: 4px; background: var(--accent-green); color: #fff; border: none; cursor: pointer;">📚 Knowledge Base / Training</button>
       </div>
       <div class="sessions-list" id="sessionsList">
         <!-- Rendered dynamically by app.js -->

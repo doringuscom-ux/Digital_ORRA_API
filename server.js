@@ -24,6 +24,7 @@ const BroadcastJob = require('./models/BroadcastJob');
 const BroadcastRecipient = require('./models/BroadcastRecipient');
 const AppConfig = require('./models/AppConfig');
 const KnowledgeBase = require('./models/KnowledgeBase');
+const BotFlow = require('./models/BotFlow');
 
 const app = express();
 app.use(cors());
@@ -249,16 +250,21 @@ app.post('/webhook', async (req, res) => {
 
             if (messageType === 'text') {
               textBody = message.text.body;
-            } else if (messageType === 'interactive' && message.interactive.type === 'list_reply') {
-              textBody = message.interactive.list_reply.title;
-              interactiveId = message.interactive.list_reply.id;
+            } else if (messageType === 'interactive' && message.interactive) {
+              if (message.interactive.type === 'list_reply') {
+                textBody = message.interactive.list_reply.title;
+                interactiveId = message.interactive.list_reply.id;
+              } else if (message.interactive.type === 'button_reply') {
+                textBody = message.interactive.button_reply.title;
+                interactiveId = message.interactive.button_reply.id;
+              }
             }
 
             if (!textBody) {
               return res.status(200).send('EVENT_RECEIVED');
             }
 
-            console.log(`Message content: "${textBody}"`);
+            console.log(`Message content: "${textBody}" (Interactive ID: ${interactiveId || 'none'})`);
 
             // Find or create session in DB
             let session = await Session.findOne({ phone: from });
@@ -269,6 +275,9 @@ app.post('/webhook', async (req, res) => {
                 aiEnabled: true,
                 pausedUntil: null,
                 language: null,
+                flowStep: 'start',
+                flowCompleted: false,
+                flowData: {},
                 history: [{ role: 'system', content: systemInstruction }]
               });
             } else {
@@ -278,6 +287,8 @@ app.post('/webhook', async (req, res) => {
               if (!session.history || session.history.length === 0) {
                 session.history = [{ role: 'system', content: systemInstruction }];
               }
+              if (!session.flowData) session.flowData = {};
+              if (!session.flowStep) session.flowStep = session.flowCompleted ? 'completed' : 'start';
             }
 
             // Deduplication check
@@ -287,24 +298,23 @@ app.post('/webhook', async (req, res) => {
               return res.status(200).send('EVENT_RECEIVED');
             }
 
-            // Handle keywords for Menu or Language Change
+            // Handle keywords for Menu or Restart Flow
             if (messageType === 'text') {
               const lowerText = textBody.toLowerCase().trim();
-              if (['menu', 'language', 'change language', 'bhasha', 'options'].includes(lowerText)) {
-                console.log(`User ${from} requested menu/language change.`);
-                try {
-                  await sendLanguageSelectionMenu(from);
-                } catch (err) {
-                  console.error('Error sending language menu:', err.message);
-                }
-                return res.status(200).send('EVENT_RECEIVED');
+              if (['menu', 'restart', 'reset', 'start over', 'language', 'change language', 'bhasha', 'options'].includes(lowerText)) {
+                console.log(`User ${from} requested menu/restart flow.`);
+                session.flowStep = 'start';
+                session.flowCompleted = false;
+                session.flowData = {};
+                session.language = null;
               }
             }
 
-            // Handle Language Selection Reply
+            // Handle Language Selection Reply if directly received
             if (messageType === 'interactive' && interactiveId && interactiveId.startsWith('lang_')) {
               session.language = textBody;
-              await session.save();
+              if (!session.flowData) session.flowData = {};
+              session.flowData.language = textBody;
               console.log(`User ${from} selected language: ${session.language}`);
             }
 
@@ -331,15 +341,97 @@ app.post('/webhook', async (req, res) => {
               console.error('Failed to send push notification:', pushErr.message);
             }
 
-            // --- LANGUAGE SELECTION INTERCEPT ---
-            if (!session.language) {
+            // --- ONBOARDING WELCOME FLOW INTERCEPT ---
+            const flowConfig = await getBotFlowConfig();
+
+            if (flowConfig && flowConfig.isEnabled && !session.flowCompleted) {
+              const steps = flowConfig.steps || [];
+              const step1Lang = steps.find(s => s.stepKey === 'language') || steps[0];
+              const step2Interest = steps.find(s => s.stepKey === 'interest_type') || steps[1];
+              const step3Courses = steps.find(s => s.stepKey === 'course_selection') || steps[2];
+              const step3Services = steps.find(s => s.stepKey === 'service_selection') || steps[3];
+              const step4Lead = steps.find(s => s.stepKey === 'lead_info') || steps[4];
+              const step5Completion = steps.find(s => s.stepKey === 'completion') || steps[5];
+
+              let stepToSend = null;
+
+              if (session.flowStep === 'start') {
+                if (interactiveId && interactiveId.startsWith('lang_')) {
+                  session.language = textBody;
+                  session.flowData.language = textBody;
+                  session.flowStep = 'step_2';
+                  stepToSend = step2Interest;
+                } else {
+                  session.flowStep = 'step_1';
+                  stepToSend = step1Lang;
+                }
+              } else if (session.flowStep === 'step_1') {
+                session.language = textBody;
+                session.flowData.language = textBody;
+                session.flowStep = 'step_2';
+                stepToSend = step2Interest;
+              } else if (session.flowStep === 'step_2') {
+                session.flowData.interest = textBody;
+                const lower = textBody.toLowerCase();
+                if (interactiveId === 'btn_courses' || lower.includes('course') || lower.includes('learn') || lower.includes('study')) {
+                  session.flowStep = 'step_3_courses';
+                  stepToSend = step3Courses;
+                } else if (interactiveId === 'btn_services' || lower.includes('service') || lower.includes('business')) {
+                  session.flowStep = 'step_3_services';
+                  stepToSend = step3Services;
+                } else {
+                  session.flowStep = 'step_4';
+                  stepToSend = step4Lead;
+                }
+              } else if (session.flowStep === 'step_3_courses' || session.flowStep === 'step_3_services') {
+                session.flowData.selectedItem = textBody;
+                session.flowStep = 'step_4';
+                stepToSend = step4Lead;
+              } else if (session.flowStep === 'step_4') {
+                session.flowData.leadInfo = textBody;
+                if (!session.name && textBody.length < 40 && !textBody.includes('\n')) {
+                  session.name = textBody.trim();
+                }
+                session.flowStep = 'completed';
+                session.flowCompleted = true;
+                stepToSend = step5Completion;
+              }
+
+              if (stepToSend) {
+                console.log(`[Bot Flow] Dispatching step to ${from} (${session.language || 'default'}):`, stepToSend.title || stepToSend.stepKey);
+                try {
+                  const metaRes = await dispatchFlowStep(from, stepToSend, session.language);
+                  let sentMetaId = null;
+                  if (metaRes && metaRes.messages && metaRes.messages.length > 0) {
+                    sentMetaId = metaRes.messages[0].id;
+                  }
+                  const localizedStep = getLocalizedStep(stepToSend, session.language);
+                  session.history.push({
+                    role: 'assistant',
+                    content: extractStepContent(localizedStep),
+                    timestamp: new Date().toISOString(),
+                    messageId: sentMetaId,
+                    status: 'sent'
+                  });
+                  session.markModified('history');
+                  session.markModified('flowData');
+                  await session.save();
+                  return res.status(200).send('EVENT_RECEIVED');
+                } catch (flowErr) {
+                  console.error('Error dispatching bot flow step:', flowErr.message);
+                }
+              }
+            }
+
+            // Fallback language intercept if bot flow is disabled
+            if (!session.language && (!flowConfig || !flowConfig.isEnabled)) {
               console.log(`User ${from} has no language set. Sending language selection menu.`);
               try {
                 await sendLanguageSelectionMenu(from);
               } catch (err) {
                 console.error('Error sending language menu:', err.message);
               }
-              return res.status(200).send('EVENT_RECEIVED'); // Wait for selection
+              return res.status(200).send('EVENT_RECEIVED');
             }
             // ------------------------------------
 
@@ -607,6 +699,57 @@ app.delete('/api/knowledge/:id', async (req, res) => {
 });
 // --------------------------------
 
+// --- Bot Flow Configuration Endpoints ---
+app.get('/api/bot-flow', async (req, res) => {
+  try {
+    await connectDB();
+    const flow = await getBotFlowConfig();
+    res.json({ success: true, flow });
+  } catch (err) {
+    console.error('Error fetching bot flow:', err.message);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.post('/api/bot-flow', async (req, res) => {
+  try {
+    await connectDB();
+    const { isEnabled, steps } = req.body;
+    let flow = await BotFlow.findOne({ key: 'welcome_flow' });
+    if (!flow) {
+      flow = new BotFlow({ key: 'welcome_flow' });
+    }
+    if (typeof isEnabled === 'boolean') {
+      flow.isEnabled = isEnabled;
+    }
+    if (steps && Array.isArray(steps)) {
+      flow.steps = steps;
+    }
+    await flow.save();
+    res.json({ success: true, flow });
+  } catch (err) {
+    console.error('Error saving bot flow:', err.message);
+    res.status(500).json({ error: 'Failed to update bot flow' });
+  }
+});
+
+app.post('/api/bot-flow/reset', async (req, res) => {
+  try {
+    await connectDB();
+    const defaultFlow = getDefaultBotFlow();
+    let flow = await BotFlow.findOneAndUpdate(
+      { key: 'welcome_flow' },
+      { isEnabled: defaultFlow.isEnabled, steps: defaultFlow.steps },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, flow });
+  } catch (err) {
+    console.error('Error resetting bot flow:', err.message);
+    res.status(500).json({ error: 'Failed to reset bot flow' });
+  }
+});
+// ----------------------------------------
+
 app.post('/send-message', async (req, res) => {
   const { to, message } = req.body;
 
@@ -780,6 +923,333 @@ async function sendLanguageSelectionMenu(to) {
   }
 }
 
+async function sendWhatsAppButtons(to, bodyText, buttons = [], headerText = '', footerText = '') {
+  const url = `https://graph.facebook.com/${META_API_VERSION}/${PHONE_NUMBER_ID}/messages`;
+  
+  const formattedButtons = buttons.slice(0, 3).map(b => ({
+    type: 'reply',
+    reply: {
+      id: b.id,
+      title: (b.title || '').substring(0, 20)
+    }
+  }));
+
+  const interactive = {
+    type: 'button',
+    body: { text: bodyText },
+    action: { buttons: formattedButtons }
+  };
+  if (headerText) interactive.header = { type: 'text', text: headerText };
+  if (footerText) interactive.footer = { text: footerText };
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: to,
+    type: 'interactive',
+    interactive: interactive
+  };
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${WHATSAPP_TOKEN}`
+  };
+
+  try {
+    const response = await axios.post(url, payload, { headers });
+    return response.data;
+  } catch (error) {
+    console.error('Error sending WhatsApp Buttons:', error.response ? error.response.data : error.message);
+    // Fallback to text if buttons fail
+    let fallback = (headerText ? `*${headerText}*\n\n` : '') + bodyText + '\n\n' + buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
+    if (footerText) fallback += `\n\n_${footerText}_`;
+    return await sendWhatsAppTextMessage(to, fallback);
+  }
+}
+
+async function sendWhatsAppList(to, bodyText, buttonLabel = 'Select Option', sections = [], headerText = '', footerText = '') {
+  const url = `https://graph.facebook.com/${META_API_VERSION}/${PHONE_NUMBER_ID}/messages`;
+
+  const interactive = {
+    type: 'list',
+    body: { text: bodyText },
+    action: {
+      button: (buttonLabel || 'Select').substring(0, 20),
+      sections: sections
+    }
+  };
+  if (headerText) interactive.header = { type: 'text', text: headerText };
+  if (footerText) interactive.footer = { text: footerText };
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: to,
+    type: 'interactive',
+    interactive: interactive
+  };
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${WHATSAPP_TOKEN}`
+  };
+
+  try {
+    const response = await axios.post(url, payload, { headers });
+    return response.data;
+  } catch (error) {
+    console.error('Error sending WhatsApp List:', error.response ? error.response.data : error.message);
+    // Fallback to text if list fails
+    let fallback = (headerText ? `*${headerText}*\n\n` : '') + bodyText + '\n\n';
+    sections.forEach(sec => {
+      if (sec.title) fallback += `*${sec.title}*\n`;
+      sec.rows.forEach((r, i) => {
+        fallback += `${i + 1}. ${r.title}${r.description ? ` - ${r.description}` : ''}\n`;
+      });
+    });
+    if (footerText) fallback += `\n_${footerText}_`;
+    return await sendWhatsAppTextMessage(to, fallback);
+  }
+}
+
+function getDefaultBotFlow() {
+  return {
+    key: 'welcome_flow',
+    isEnabled: true,
+    steps: [
+      {
+        stepNumber: 1,
+        stepKey: 'language',
+        title: 'Step 1: Language Selection',
+        messageType: 'interactive_list',
+        headerText: 'Choose Language / भाषा चुनें',
+        bodyText: 'Please select your preferred language to continue / कृपया जारी रखने के लिए अपनी भाषा चुनें:',
+        footerText: 'Digital ORRA',
+        actionButtonText: 'Select Language',
+        options: [
+          { id: 'lang_hindi', title: 'Hindi (हिंदी)', description: 'हिंदी में बातचीत करें' },
+          { id: 'lang_english', title: 'English', description: 'Chat in English' },
+          { id: 'lang_hinglish', title: 'Hinglish', description: 'Hindi + English mix' },
+          { id: 'lang_punjabi', title: 'Punjabi (ਪੰਜਾਬੀ)', description: 'ਪੰਜਾਬੀ ਵਿੱਚ ਗੱਲਬਾਤ ਕਰੋ' }
+        ]
+      },
+      {
+        stepNumber: 2,
+        stepKey: 'interest_type',
+        title: 'Step 2: Courses vs Services',
+        messageType: 'interactive_button',
+        headerText: 'Welcome to Digital ORRA! 🚀',
+        bodyText: 'Hum practical learning, live projects aur digital marketing solutions provide karte hain.\n\nAapko kis cheez me interest hai?',
+        footerText: 'Digital ORRA - Panchkula',
+        actionButtonText: 'Choose Option',
+        options: [
+          { id: 'btn_courses', title: '📚 Courses', description: 'Learn skills & get placed' },
+          { id: 'btn_services', title: '💼 Services', description: 'Grow your business' },
+          { id: 'btn_inquiry', title: '❓ Other Inquiry', description: 'Talk to representative' }
+        ]
+      },
+      {
+        stepNumber: 3,
+        stepKey: 'course_selection',
+        title: 'Step 3A: Courses List',
+        messageType: 'interactive_list',
+        headerText: 'Our Top Programs 🎓',
+        bodyText: 'Aap kaun sa course explore karna chahte hain? Please select from below:',
+        footerText: '100% Practical & Placement Support',
+        actionButtonText: 'View Courses',
+        options: [
+          { id: 'opt_dm', title: 'Digital Marketing + AI', description: 'SEO, Ads, Social Media, AI Tools' },
+          { id: 'opt_fsd', title: 'Full Stack Web Dev', description: 'MERN Stack, Frontend, Backend' },
+          { id: 'opt_ve', title: 'Video Editing & VFX', description: 'Premiere Pro, After Effects' },
+          { id: 'opt_gd', title: 'Graphic Designing', description: 'Photoshop, Illustrator, Canva' },
+          { id: 'opt_all_courses', title: 'All Courses Details', description: 'Complete fee structure & brochure' }
+        ]
+      },
+      {
+        stepNumber: 4,
+        stepKey: 'service_selection',
+        title: 'Step 3B: Services List',
+        messageType: 'interactive_list',
+        headerText: 'Digital Services 📈',
+        bodyText: 'Apne business growth ke liye kaun si service explore karna chahte hain?',
+        footerText: 'ROI Focused Marketing',
+        actionButtonText: 'View Services',
+        options: [
+          { id: 'opt_meta_ads', title: 'Meta Ads (FB & Insta)', description: 'Targeted leads & sales growth' },
+          { id: 'opt_google_ads', title: 'Google Ads & PPC', description: 'High intent search campaigns' },
+          { id: 'opt_seo', title: 'SEO & Website Ranking', description: 'Rank #1 on Google organically' },
+          { id: 'opt_web_dev', title: 'Website Development', description: 'Modern, fast & responsive websites' },
+          { id: 'opt_all_services', title: 'Consultation Call', description: 'Free digital marketing strategy' }
+        ]
+      },
+      {
+        stepNumber: 5,
+        stepKey: 'lead_info',
+        title: 'Step 4: Name & Background Details',
+        messageType: 'text',
+        headerText: '',
+        bodyText: 'Bahut accha! Hamari team aapse connect karke best guidance aur special offer provide karegi.\n\nKripya apna *Name* aur aap abhi kya karte hain (Student / Job-seeker / Business Owner) batayein?',
+        footerText: '',
+        actionButtonText: '',
+        options: []
+      },
+      {
+        stepNumber: 6,
+        stepKey: 'completion',
+        title: 'Step 5: Handover to AI & Confirmation',
+        messageType: 'text',
+        headerText: '',
+        bodyText: 'Dhanyawaad! Aapki information register ho gayi hai. Hamari team aapse jald hi call/WhatsApp par contact karegi.\n\nAgar aapka koi bhi specific sawal ya requirement hai, toh aap yahan pooch sakte hain - hum turant reply karenge! 😊',
+        footerText: '',
+        actionButtonText: '',
+        options: []
+      }
+    ]
+  };
+}
+
+async function getBotFlowConfig() {
+  let flow = await BotFlow.findOne({ key: 'welcome_flow' });
+  if (!flow) {
+    flow = new BotFlow(getDefaultBotFlow());
+    await flow.save();
+  }
+  return flow;
+}
+
+const FLOW_TRANSLATIONS = {
+  english: {
+    interest_type: {
+      headerText: 'Welcome to Digital ORRA! 🚀',
+      bodyText: 'We provide practical learning, live projects, and digital marketing growth solutions.\n\nWhat are you interested in?',
+      footerText: 'Digital ORRA - Panchkula',
+      options: [
+        { id: 'btn_courses', title: '📚 Courses' },
+        { id: 'btn_services', title: '💼 Services' },
+        { id: 'btn_inquiry', title: '❓ Other Inquiry' }
+      ]
+    },
+    course_selection: {
+      headerText: 'Our Top Programs 🎓',
+      bodyText: 'Which course would you like to explore? Please select from below:',
+      footerText: '100% Practical & Placement Support',
+      actionButtonText: 'View Courses'
+    },
+    service_selection: {
+      headerText: 'Digital Services 📈',
+      bodyText: 'Which service would you like to explore for your business growth?',
+      footerText: 'ROI Focused Marketing',
+      actionButtonText: 'View Services'
+    },
+    lead_info: {
+      bodyText: 'Great! Our team will connect with you to share the best guidance and special offers.\n\nPlease share your *Name* and what you currently do (Student / Job-seeker / Business Owner)?'
+    },
+    completion: {
+      bodyText: 'Thank you! Your information has been registered. Our team will contact you shortly via call or WhatsApp.\n\nIf you have any specific questions or doubts right now, feel free to ask here - we will reply right away! 😊'
+    }
+  },
+  punjabi: {
+    interest_type: {
+      headerText: 'Digital ORRA ਵਿੱਚ ਤੁਹਾਡਾ ਸੁਆਗਤ ਹੈ! 🚀',
+      bodyText: 'ਅਸੀਂ ਪ੍ਰੈਕਟੀਕਲ ਟਰੇਨਿੰਗ, ਲਾਈਵ ਪ੍ਰੋਜੈਕਟਸ ਅਤੇ ਡਿਜੀਟਲ ਮਾਰਕੀਟਿੰਗ ਸਲਿਊਸ਼ਨ ਪ੍ਰਦਾਨ ਕਰਦੇ ਹਾਂ।\n\nਤੁਸੀਂ ਕਿਸ ਚੀਜ਼ ਵਿੱਚ ਰੁਚੀ ਰੱਖਦੇ ਹੋ?',
+      footerText: 'Digital ORRA - Panchkula',
+      options: [
+        { id: 'btn_courses', title: '📚 ਕੋਰਸ (Courses)' },
+        { id: 'btn_services', title: '💼 ਸਰਵਿਸਾਂ (Services)' },
+        { id: 'btn_inquiry', title: '❓ ਹੋਰ ਪੁੱਛਗਿੱਛ' }
+      ]
+    },
+    course_selection: {
+      headerText: 'ਸਾਡੇ ਪ੍ਰਮੁੱਖ ਪ੍ਰੋਗਰਾਮ 🎓',
+      bodyText: 'ਤੁਸੀਂ ਕਿਹੜਾ ਕੋਰਸ ਐਕਸਪਲੋਰ ਕਰਨਾ ਚਾਹੁੰਦੇ ਹੋ? ਕਿਰਪਾ ਕਰਕੇ ਹੇਠਾਂ ਤੋਂ ਚੁਣੋ:',
+      footerText: '100% ਪ੍ਰੈਕਟੀਕਲ ਅਤੇ ਪਲੇਸਮੈਂਟ ਸਹਾਇਤਾ',
+      actionButtonText: 'ਕੋਰਸ ਦੇਖੋ'
+    },
+    service_selection: {
+      headerText: 'ਡਿਜੀਟਲ ਸਰਵਿਸਾਂ 📈',
+      bodyText: 'ਆਪਣੇ ਕਾਰੋਬਾਰ ਨੂੰ ਵਧਾਉਣ ਲਈ ਤੁਸੀਂ ਕਿਹੜੀ ਸਰਵਿਸ ਲੈਣਾ ਚਾਹੁੰਦੇ ਹੋ?',
+      footerText: 'ROI Focused Marketing',
+      actionButtonText: 'ਸਰਵਿਸਾਂ ਦੇਖੋ'
+    },
+    lead_info: {
+      bodyText: 'ਬਹੁਤ ਵਧੀਆ! ਸਾਡੀ ਟੀਮ ਤੁਹਾਡੇ ਨਾਲ ਸੰਪਰਕ ਕਰਕੇ ਪੂਰੀ ਜਾਣਕਾਰੀ ਅਤੇ ਸਪੈਸ਼ਲ ਆਫਰ ਸਾਂਝਾ ਕਰੇਗੀ।\n\nਕਿਰਪਾ ਕਰਕੇ ਆਪਣਾ *ਨਾਮ* ਅਤੇ ਤੁਸੀਂ ਹੁਣ ਕੀ ਕਰਦੇ ਹੋ (ਵਿਦਿਆਰਥੀ / ਨੌਕਰੀ ਲੱਭ ਰਹੇ ਹੋ / ਬਿਜ਼ਨਸ ਓਨਰ) ਦੱਸੋ?'
+    },
+    completion: {
+      bodyText: 'ਧੰਨਵਾਦ! ਤੁਹਾਡੀ ਜਾਣਕਾਰੀ ਦਰਜ ਕਰ ਲਈ ਗਈ ਹੈ। ਸਾਡੀ ਟੀਮ ਜਲਦੀ ਹੀ ਤੁਹਾਡੇ ਨਾਲ ਕਾਲ ਜਾਂ WhatsApp ਰਾਹੀਂ ਸੰਪਰਕ ਕਰੇਗੀ।\n\nਜੇਕਰ ਤੁਹਾਡਾ ਕੋਈ ਵੀ ਸਵਾਲ ਹੈ, ਤਾਂ ਤੁਸੀਂ ਇੱਥੇ ਪੁੱਛ ਸਕਦੇ ਹੋ - ਅਸੀਂ ਤੁਰੰਤ ਜਵਾਬ ਦੇਵਾਂਗੇ! 😊'
+    }
+  }
+};
+
+function getLocalizedStep(step, language) {
+  if (!step) return step;
+  if (!language) return step;
+  const langLower = String(language).toLowerCase();
+  let langKey = null;
+  if (langLower.includes('english')) langKey = 'english';
+  else if (langLower.includes('punjabi') || langLower.includes('ਪੰਜਾਬੀ')) langKey = 'punjabi';
+
+  if (!langKey || !FLOW_TRANSLATIONS[langKey] || !FLOW_TRANSLATIONS[langKey][step.stepKey]) {
+    return step;
+  }
+
+  const trans = FLOW_TRANSLATIONS[langKey][step.stepKey];
+  const localized = { ...(step.toObject ? step.toObject() : step) };
+  if (trans.headerText !== undefined) localized.headerText = trans.headerText;
+  if (trans.bodyText !== undefined) localized.bodyText = trans.bodyText;
+  if (trans.footerText !== undefined) localized.footerText = trans.footerText;
+  if (trans.actionButtonText !== undefined) localized.actionButtonText = trans.actionButtonText;
+  if (trans.options && Array.isArray(trans.options)) {
+    localized.options = trans.options.map((opt, i) => ({
+      ...(localized.options && localized.options[i] ? localized.options[i] : {}),
+      ...opt
+    }));
+  }
+  return localized;
+}
+
+async function dispatchFlowStep(to, step, language = null) {
+  if (!step) return null;
+  const localized = getLocalizedStep(step, language);
+  if (localized.messageType === 'interactive_button') {
+    return await sendWhatsAppButtons(
+      to,
+      localized.bodyText,
+      localized.options || [],
+      localized.headerText,
+      localized.footerText
+    );
+  } else if (localized.messageType === 'interactive_list') {
+    const rows = (localized.options || []).map(opt => ({
+      id: opt.id,
+      title: (opt.title || '').substring(0, 24),
+      description: (opt.description || '').substring(0, 72)
+    }));
+    return await sendWhatsAppList(
+      to,
+      localized.bodyText,
+      localized.actionButtonText || 'Select Option',
+      [{ title: 'Options', rows: rows }],
+      localized.headerText,
+      localized.footerText
+    );
+  } else {
+    let msg = localized.bodyText;
+    if (localized.headerText) msg = `*${localized.headerText}*\n\n` + msg;
+    if (localized.footerText) msg = msg + `\n\n_${localized.footerText}_`;
+    return await sendWhatsAppTextMessage(to, msg);
+  }
+}
+
+function extractStepContent(step) {
+  if (!step) return '';
+  let content = step.bodyText || '';
+  if (step.headerText) content = `${step.headerText}\n\n${content}`;
+  if (step.options && step.options.length > 0) {
+    content += '\n' + step.options.map(o => `• ${o.title}`).join('\n');
+  }
+  return content;
+}
+
 /**
  * Helper function to generate response using Google Gemini AI (Paid Tier) with Groq Backup
  */
@@ -805,6 +1275,21 @@ async function generateAISessionReply(userId, userMessage) {
     history[0] = {
       role: 'system',
       content: history[0].content + `\n\nCRITICAL INSTRUCTION: The user has selected ${session.language} as their preferred language. You MUST reply fluently in ${session.language}. If the user writes in Roman (English) script, reply in Roman ${session.language}. If they write in native script, use native script. Do not mix other languages unnecessarily.`
+    };
+  }
+
+  // Inject User Onboarding Selections if available
+  if (session.flowData && Object.keys(session.flowData).length > 0) {
+    const fd = session.flowData;
+    let flowSummary = '\n\n=== USER PROFILE & ONBOARDING DATA ===\n';
+    if (fd.language) flowSummary += `- Selected Language: ${fd.language}\n`;
+    if (fd.interest) flowSummary += `- Requirement / Interest: ${fd.interest}\n`;
+    if (fd.selectedItem) flowSummary += `- Specific Course / Service Chosen: ${fd.selectedItem}\n`;
+    if (fd.leadInfo) flowSummary += `- User Background & Details: ${fd.leadInfo}\n`;
+    flowSummary += 'IMPORTANT: Use this user context to personalize your responses naturally. Do not ask them to re-select or repeat what they already told you.\n=======================================\n';
+    history[0] = {
+      role: 'system',
+      content: (history[0] ? history[0].content : '') + flowSummary
     };
   }
 

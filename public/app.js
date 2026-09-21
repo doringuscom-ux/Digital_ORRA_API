@@ -511,3 +511,223 @@ window.deleteKnowledge = async function(id) {
     console.error(e);
   }
 };
+
+// --- Bot Welcome Flow Builder Logic ---
+const btnOpenBotFlow = document.getElementById('btnOpenBotFlow');
+const btnCloseBotFlow = document.getElementById('btnCloseBotFlow');
+const botFlowModal = document.getElementById('botFlowModal');
+const flowToggleCheckbox = document.getElementById('flowToggleCheckbox');
+const flowStepsContainer = document.getElementById('flowStepsContainer');
+const btnSaveFlow = document.getElementById('btnSaveFlow');
+const btnResetFlow = document.getElementById('btnResetFlow');
+const flowSaveStatus = document.getElementById('flowSaveStatus');
+
+let currentBotFlow = null;
+
+if (btnOpenBotFlow) {
+  btnOpenBotFlow.addEventListener('click', () => {
+    if (botFlowModal) botFlowModal.style.display = 'flex';
+    fetchBotFlow();
+  });
+}
+
+if (btnCloseBotFlow) {
+  btnCloseBotFlow.addEventListener('click', () => {
+    if (botFlowModal) botFlowModal.style.display = 'none';
+  });
+}
+
+async function fetchBotFlow() {
+  if (!flowStepsContainer) return;
+  try {
+    const res = await fetch('/api/bot-flow');
+    if (!res.ok) throw new Error('Failed to load bot flow');
+    const data = await res.json();
+    currentBotFlow = data.flow || {};
+    
+    if (flowToggleCheckbox) {
+      flowToggleCheckbox.checked = currentBotFlow.isEnabled !== false;
+    }
+    
+    renderFlowSteps();
+  } catch (err) {
+    console.error('Error fetching bot flow:', err);
+    flowStepsContainer.innerHTML = '<div style="color:#ff5c5c; padding:10px;">Failed to load flow steps.</div>';
+  }
+}
+
+function renderFlowSteps() {
+  if (!flowStepsContainer || !currentBotFlow || !currentBotFlow.steps) return;
+  
+  flowStepsContainer.innerHTML = '';
+  
+  currentBotFlow.steps.forEach((step, index) => {
+    const card = document.createElement('div');
+    card.className = 'flow-step-card';
+    card.setAttribute('data-step-index', index);
+
+    // Determine badge type
+    let badgeClass = 'badge-text';
+    let badgeLabel = '💬 Text Prompt';
+    if (step.messageType === 'interactive_button') {
+      badgeClass = 'badge-button';
+      badgeLabel = '🔘 WhatsApp Buttons (Quick Replies)';
+    } else if (step.messageType === 'interactive_list') {
+      badgeClass = 'badge-list';
+      badgeLabel = '📋 WhatsApp List Menu';
+    }
+
+    let optionsHtml = '';
+    if (step.options && step.options.length > 0) {
+      optionsHtml = `
+        <div class="options-container">
+          <label class="flow-input-label" style="font-weight:600; color:#fff;">Options / Buttons to Display:</label>
+          ${step.options.map((opt, optIndex) => `
+            <div class="option-row" data-opt-index="${optIndex}">
+              <input type="text" class="flow-text-input opt-title" placeholder="Button/Option Title" value="${escapeHtml(opt.title || '')}" style="flex: 1;">
+              <input type="text" class="flow-text-input opt-desc" placeholder="Short description (for list)" value="${escapeHtml(opt.description || '')}" style="flex: 1.5; ${step.messageType === 'interactive_button' ? 'display:none;' : ''}">
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    card.innerHTML = `
+      <div class="flow-step-header">
+        <div class="flow-step-title">
+          <span>${escapeHtml(step.title || `Step ${step.stepNumber}`)}</span>
+        </div>
+        <span class="flow-step-badge ${badgeClass}">${badgeLabel}</span>
+      </div>
+
+      <div>
+        <label class="flow-input-label">Message Header (Optional bold headline):</label>
+        <input type="text" class="flow-text-input step-header" placeholder="e.g. Welcome to Digital ORRA! 🚀" value="${escapeHtml(step.headerText || '')}">
+      </div>
+
+      <div>
+        <label class="flow-input-label">Message Content / Question (Required):</label>
+        <textarea class="flow-textarea step-body" rows="3" placeholder="Enter message text">${escapeHtml(step.bodyText || '')}</textarea>
+      </div>
+
+      ${step.messageType === 'interactive_list' ? `
+        <div>
+          <label class="flow-input-label">List Button Text:</label>
+          <input type="text" class="flow-text-input step-btn-label" placeholder="e.g. Select Option" value="${escapeHtml(step.actionButtonText || 'Select Option')}">
+        </div>
+      ` : ''}
+
+      ${optionsHtml}
+
+      <div>
+        <label class="flow-input-label">Footer Note (Optional subtle text):</label>
+        <input type="text" class="flow-text-input step-footer" placeholder="e.g. Digital ORRA - Panchkula" value="${escapeHtml(step.footerText || '')}">
+      </div>
+    `;
+
+    flowStepsContainer.appendChild(card);
+  });
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+if (btnSaveFlow) {
+  btnSaveFlow.addEventListener('click', async () => {
+    if (!currentBotFlow || !currentBotFlow.steps) return;
+    
+    // Harvest inputs from DOM
+    const stepCards = document.querySelectorAll('.flow-step-card');
+    stepCards.forEach((card, idx) => {
+      const step = currentBotFlow.steps[idx];
+      if (!step) return;
+
+      const headerInput = card.querySelector('.step-header');
+      const bodyInput = card.querySelector('.step-body');
+      const footerInput = card.querySelector('.step-footer');
+      const btnLabelInput = card.querySelector('.step-btn-label');
+
+      if (headerInput) step.headerText = headerInput.value.trim();
+      if (bodyInput) step.bodyText = bodyInput.value.trim();
+      if (footerInput) step.footerText = footerInput.value.trim();
+      if (btnLabelInput) step.actionButtonText = btnLabelInput.value.trim();
+
+      const optRows = card.querySelectorAll('.option-row');
+      optRows.forEach((row, oIdx) => {
+        if (step.options && step.options[oIdx]) {
+          const tInput = row.querySelector('.opt-title');
+          const dInput = row.querySelector('.opt-desc');
+          if (tInput) step.options[oIdx].title = tInput.value.trim();
+          if (dInput) step.options[oIdx].description = dInput.value.trim();
+        }
+      });
+    });
+
+    const isEnabled = flowToggleCheckbox ? flowToggleCheckbox.checked : true;
+
+    btnSaveFlow.disabled = true;
+    btnSaveFlow.innerText = 'Saving...';
+
+    try {
+      const res = await fetch('/api/bot-flow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          isEnabled: isEnabled,
+          steps: currentBotFlow.steps
+        })
+      });
+
+      if (res.ok) {
+        if (flowSaveStatus) {
+          flowSaveStatus.style.display = 'inline';
+          setTimeout(() => { flowSaveStatus.style.display = 'none'; }, 3000);
+        }
+      } else {
+        alert('Failed to save flow. Please check console.');
+      }
+    } catch (err) {
+      console.error('Error saving flow:', err);
+      alert('Network error while saving flow.');
+    } finally {
+      btnSaveFlow.disabled = false;
+      btnSaveFlow.innerText = '💾 Save Flow Changes';
+    }
+  });
+}
+
+if (btnResetFlow) {
+  btnResetFlow.addEventListener('click', async () => {
+    if (!confirm('Are you sure you want to reset all steps to the default 5-step flow? Any custom text changes will be replaced.')) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/bot-flow/reset', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        currentBotFlow = data.flow || {};
+        if (flowToggleCheckbox) flowToggleCheckbox.checked = currentBotFlow.isEnabled !== false;
+        renderFlowSteps();
+        if (flowSaveStatus) {
+          flowSaveStatus.innerText = 'Reset to default successfully! ✓';
+          flowSaveStatus.style.display = 'inline';
+          setTimeout(() => { 
+            flowSaveStatus.style.display = 'none'; 
+            flowSaveStatus.innerText = 'Saved successfully! ✓';
+          }, 3000);
+        }
+      }
+    } catch (err) {
+      console.error('Error resetting flow:', err);
+    }
+  });
+}
+
