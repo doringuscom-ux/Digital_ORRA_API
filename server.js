@@ -97,8 +97,8 @@ Your primary goal is to help users find the best solution for their business or 
 
 ### SALES & COUNSELING GUIDELINES:
 1. **Welcome & Qualify**:
-   - Greet users warmly. If they greet you, introduce Digital ORRA ("👋 Welcome to Digital ORRA! Hum practical learning, live projects aur placement assistance provide karte hain. \n\nKya aap apne liye koi course dekh rahe hain ya phir apne business ko grow karne ke liye services search kar rahe hain?") and ask if they are looking for courses to learn or services for their business.
-   - Ask about their current background (student, freelancer, job-seeker, business owner) to customize your recommendation.
+   - Greet users warmly. If they greet you, introduce Digital ORRA ("👋 Welcome to Digital ORRA! Hum businesses ke liye digital marketing services aur practical courses (live projects + placement assistance) provide karte hain. \n\nKya aap apne business ko grow karne ke liye services search kar rahe hain ya phir apne liye koi course dekh rahe hain?") and ask if they are looking for services for their business or courses to learn. Always mention services first, then courses.
+   - Ask about their current background (business owner, job-seeker, freelancer, student) to customize your recommendation.
 
 2. **Transparent Fees & Selling Value**:
    - If they ask about fees, disclose the fees transparently (mention both the original fee and the discounted fee from the database).
@@ -1075,12 +1075,12 @@ function getDefaultBotFlow() {
         title: 'Step 2: Courses vs Services',
         messageType: 'interactive_button',
         headerText: 'Welcome to Digital ORRA! 🚀',
-        bodyText: 'Hum practical learning, live projects aur digital marketing solutions provide karte hain.\n\nAapko kis cheez me interest hai?',
+        bodyText: 'Hum businesses ke liye digital marketing services aur students ke liye practical courses (live projects ke saath) provide karte hain.\n\nAapko kis cheez me interest hai?',
         footerText: 'Digital ORRA - Panchkula',
         actionButtonText: 'Choose Option',
         options: [
-          { id: 'btn_courses', title: '📚 Courses', description: 'Learn skills & get placed' },
           { id: 'btn_services', title: '💼 Services', description: 'Grow your business' },
+          { id: 'btn_courses', title: '📚 Courses', description: 'Learn skills & get placed' },
           { id: 'btn_inquiry', title: '❓ Other Inquiry', description: 'Talk to representative' }
         ]
       },
@@ -1124,7 +1124,7 @@ function getDefaultBotFlow() {
         title: 'Step 4: Name & Background Details',
         messageType: 'text',
         headerText: '',
-        bodyText: 'Bahut accha! Hamari team aapse connect karke best guidance aur special offer provide karegi.\n\nKripya apna *Name* aur aap abhi kya karte hain (Student / Job-seeker / Business Owner) batayein?',
+        bodyText: 'Bahut accha! Hamari team aapse connect karke best guidance aur special offer provide karegi.\n\nKripya apna *Name* aur aap abhi kya karte hain (Business Owner / Job-seeker / Student) batayein?',
         footerText: '',
         actionButtonText: '',
         options: []
@@ -1157,11 +1157,11 @@ const FLOW_TRANSLATIONS = {
   english: {
     interest_type: {
       headerText: 'Welcome to Digital ORRA! 🚀',
-      bodyText: 'We provide practical learning, live projects, and digital marketing growth solutions.\n\nWhat are you interested in?',
+      bodyText: 'We provide digital marketing services to grow your business, and practical courses with live projects.\n\nWhat are you interested in?',
       footerText: 'Digital ORRA - Panchkula',
       options: [
-        { id: 'btn_courses', title: '📚 Courses' },
         { id: 'btn_services', title: '💼 Services' },
+        { id: 'btn_courses', title: '📚 Courses' },
         { id: 'btn_inquiry', title: '❓ Other Inquiry' }
       ]
     },
@@ -1178,7 +1178,7 @@ const FLOW_TRANSLATIONS = {
       actionButtonText: 'View Services'
     },
     lead_info: {
-      bodyText: 'Great! Our team will connect with you to share the best guidance and special offers.\n\nPlease share your *Name* and what you currently do (Student / Job-seeker / Business Owner)?'
+      bodyText: 'Great! Our team will connect with you to share the best guidance and special offers.\n\nPlease share your *Name* and what you currently do (Business Owner / Job-seeker / Student)?'
     },
     completion: {
       bodyText: 'Thank you! Your information has been registered. Our team will contact you shortly via call or WhatsApp.\n\nIf you have any specific questions or doubts right now, feel free to ask here - we will reply right away! 😊'
@@ -1187,11 +1187,11 @@ const FLOW_TRANSLATIONS = {
   punjabi: {
     interest_type: {
       headerText: 'Digital ORRA ਵਿੱਚ ਤੁਹਾਡਾ ਸੁਆਗਤ ਹੈ! 🚀',
-      bodyText: 'ਅਸੀਂ ਪ੍ਰੈਕਟੀਕਲ ਟਰੇਨਿੰਗ, ਲਾਈਵ ਪ੍ਰੋਜੈਕਟਸ ਅਤੇ ਡਿਜੀਟਲ ਮਾਰਕੀਟਿੰਗ ਸਲਿਊਸ਼ਨ ਪ੍ਰਦਾਨ ਕਰਦੇ ਹਾਂ।\n\nਤੁਸੀਂ ਕਿਸ ਚੀਜ਼ ਵਿੱਚ ਰੁਚੀ ਰੱਖਦੇ ਹੋ?',
+      bodyText: 'ਅਸੀਂ ਕਾਰੋਬਾਰਾਂ ਲਈ ਡਿਜੀਟਲ ਮਾਰਕੀਟਿੰਗ ਸਰਵਿਸਾਂ ਅਤੇ ਲਾਈਵ ਪ੍ਰੋਜੈਕਟਸ ਨਾਲ ਪ੍ਰੈਕਟੀਕਲ ਕੋਰਸ ਪ੍ਰਦਾਨ ਕਰਦੇ ਹਾਂ।\n\nਤੁਸੀਂ ਕਿਸ ਚੀਜ਼ ਵਿੱਚ ਰੁਚੀ ਰੱਖਦੇ ਹੋ?',
       footerText: 'Digital ORRA - Panchkula',
       options: [
-        { id: 'btn_courses', title: '📚 ਕੋਰਸ (Courses)' },
         { id: 'btn_services', title: '💼 ਸਰਵਿਸਾਂ (Services)' },
+        { id: 'btn_courses', title: '📚 ਕੋਰਸ (Courses)' },
         { id: 'btn_inquiry', title: '❓ ਹੋਰ ਪੁੱਛਗਿੱਛ' }
       ]
     },
@@ -1208,7 +1208,7 @@ const FLOW_TRANSLATIONS = {
       actionButtonText: 'ਸਰਵਿਸਾਂ ਦੇਖੋ'
     },
     lead_info: {
-      bodyText: 'ਬਹੁਤ ਵਧੀਆ! ਸਾਡੀ ਟੀਮ ਤੁਹਾਡੇ ਨਾਲ ਸੰਪਰਕ ਕਰਕੇ ਪੂਰੀ ਜਾਣਕਾਰੀ ਅਤੇ ਸਪੈਸ਼ਲ ਆਫਰ ਸਾਂਝਾ ਕਰੇਗੀ।\n\nਕਿਰਪਾ ਕਰਕੇ ਆਪਣਾ *ਨਾਮ* ਅਤੇ ਤੁਸੀਂ ਹੁਣ ਕੀ ਕਰਦੇ ਹੋ (ਵਿਦਿਆਰਥੀ / ਨੌਕਰੀ ਲੱਭ ਰਹੇ ਹੋ / ਬਿਜ਼ਨਸ ਓਨਰ) ਦੱਸੋ?'
+      bodyText: 'ਬਹੁਤ ਵਧੀਆ! ਸਾਡੀ ਟੀਮ ਤੁਹਾਡੇ ਨਾਲ ਸੰਪਰਕ ਕਰਕੇ ਪੂਰੀ ਜਾਣਕਾਰੀ ਅਤੇ ਸਪੈਸ਼ਲ ਆਫਰ ਸਾਂਝਾ ਕਰੇਗੀ।\n\nਕਿਰਪਾ ਕਰਕੇ ਆਪਣਾ *ਨਾਮ* ਅਤੇ ਤੁਸੀਂ ਹੁਣ ਕੀ ਕਰਦੇ ਹੋ (ਬਿਜ਼ਨਸ ਓਨਰ / ਨੌਕਰੀ ਲੱਭ ਰਹੇ ਹੋ / ਵਿਦਿਆਰਥੀ) ਦੱਸੋ?'
     },
     completion: {
       bodyText: 'ਧੰਨਵਾਦ! ਤੁਹਾਡੀ ਜਾਣਕਾਰੀ ਦਰਜ ਕਰ ਲਈ ਗਈ ਹੈ। ਸਾਡੀ ਟੀਮ ਜਲਦੀ ਹੀ ਤੁਹਾਡੇ ਨਾਲ ਕਾਲ ਜਾਂ WhatsApp ਰਾਹੀਂ ਸੰਪਰਕ ਕਰੇਗੀ।\n\nਜੇਕਰ ਤੁਹਾਡਾ ਕੋਈ ਵੀ ਸਵਾਲ ਹੈ, ਤਾਂ ਤੁਸੀਂ ਇੱਥੇ ਪੁੱਛ ਸਕਦੇ ਹੋ - ਅਸੀਂ ਤੁਰੰਤ ਜਵਾਬ ਦੇਵਾਂਗੇ! 😊'
