@@ -24,6 +24,14 @@ const BroadcastJob = require('./models/BroadcastJob');
 const BroadcastRecipient = require('./models/BroadcastRecipient');
 const AppConfig = require('./models/AppConfig');
 const KnowledgeBase = require('./models/KnowledgeBase');
+const { routeMessage } = require('./smartRouter');
+
+let coursesList = [];
+try {
+  coursesList = require('./courses.json');
+} catch (e) {
+  console.warn('courses.json not found - smart router will skip course questions.');
+}
 
 const app = express();
 app.use(cors());
@@ -347,20 +355,40 @@ app.post('/webhook', async (req, res) => {
             const isPaused = session.pausedUntil && session.pausedUntil > new Date();
 
             if (isAIEnabled && !isPaused) {
-              console.log('Generating automated response using Google Gemini AI...');
               try {
-                const aiReply = await generateAISessionReply(from, textBody);
-                console.log(`Generated Response: "${aiReply}"`);
-                const response = await sendWhatsAppTextMessage(from, aiReply);
+                // --- SMART ROUTER: answer locally if we confidently can, else forward to AI ---
+                let replyText = null;
+                let replySource = 'ai';
+                if (process.env.SMART_ROUTER !== 'off') {
+                  try {
+                    const kbItems = await KnowledgeBase.find({}).lean();
+                    const route = routeMessage({ text: textBody, session, kbItems, courses: coursesList });
+                    console.log(`[SMART ROUTER] ${route.handled ? 'LOCAL (' + route.source + ')' : 'FORWARD TO AI'} - ${route.reason}`);
+                    if (route.handled) {
+                      replyText = route.reply;
+                      replySource = route.source;
+                    }
+                  } catch (routerErr) {
+                    console.error('Smart router error, falling back to AI:', routerErr.message);
+                  }
+                }
+
+                if (!replyText) {
+                  console.log('Generating automated response using Google Gemini AI...');
+                  replyText = await generateAISessionReply(from, textBody);
+                }
+                console.log(`Generated Response (${replySource}): "${replyText}"`);
+                const response = await sendWhatsAppTextMessage(from, replyText);
                 let metaMsgId = null;
-                if (response.messages && response.messages.length > 0) metaMsgId = response.messages[0].id;
-                
-                session.history.push({ 
-                  role: 'assistant', 
-                  content: aiReply, 
+                if (response && response.messages && response.messages.length > 0) metaMsgId = response.messages[0].id;
+
+                session.history.push({
+                  role: 'assistant',
+                  content: replyText,
                   timestamp: new Date().toISOString(),
                   messageId: metaMsgId,
-                  status: 'sent'
+                  status: 'sent',
+                  source: replySource
                 });
                 session.markModified('history');
                 await session.save();
@@ -557,6 +585,12 @@ app.post('/api/toggle-ai', async (req, res) => {
 });
 
 // --- Knowledge Base Endpoints ---
+// Accepts "fee, fees kitni, price" or ["fee", "price"]
+function parseKeywords(raw) {
+  if (!raw) return [];
+  const arr = Array.isArray(raw) ? raw : String(raw).split(',');
+  return arr.map(k => String(k).trim().toLowerCase()).filter(Boolean);
+}
 app.get('/api/knowledge', async (req, res) => {
   try {
     await connectDB();
@@ -572,7 +606,8 @@ app.post('/api/knowledge', async (req, res) => {
     await connectDB();
     const { question, answer } = req.body;
     if (!question || !answer) return res.status(400).json({ error: 'Question and answer required' });
-    const newKb = new KnowledgeBase({ question, answer });
+    const keywords = parseKeywords(req.body.keywords);
+    const newKb = new KnowledgeBase({ question, answer, keywords });
     await newKb.save();
     res.json({ success: true, item: newKb });
   } catch (err) {
@@ -585,9 +620,10 @@ app.put('/api/knowledge/:id', async (req, res) => {
     await connectDB();
     const { question, answer } = req.body;
     if (!question || !answer) return res.status(400).json({ error: 'Question and answer required' });
+    const keywords = parseKeywords(req.body.keywords);
     const updatedKb = await KnowledgeBase.findByIdAndUpdate(
       req.params.id,
-      { question, answer },
+      { question, answer, keywords },
       { new: true }
     );
     res.json({ success: true, item: updatedKb });

@@ -437,12 +437,14 @@ function renderKnowledgeBase(data) {
     // Escape quotes to safely pass to inline onclick handler
     const safeQ = item.question.replace(/'/g, "\\'").replace(/"/g, '&quot;');
     const safeA = item.answer.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    
+    const kwText = (item.keywords || []).join(', ');
+
     div.innerHTML = `
       <p><strong>Q:</strong> ${item.question}</p>
       <p><strong>A:</strong> ${item.answer}</p>
+      ${kwText ? `<p style="font-size: 0.8rem; opacity: 0.7;"><strong>Keywords:</strong> ${kwText}</p>` : ''}
       <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 5px;">
-        <button class="btn-edit-kb" style="background: var(--accent-blue); color: #fff; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 0.8rem;" onclick="editKnowledge('${item._id}', '${safeQ}', '${safeA}')">Edit</button>
+        <button class="btn-edit-kb" style="background: var(--accent-blue); color: #fff; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 0.8rem;" onclick="editKnowledge('${item._id}', '${safeQ}', '${safeA}', '${kwText.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')">Edit</button>
         <button class="btn-delete-kb" style="background: #ff5c5c; color: #fff; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 0.8rem; position: static;" onclick="deleteKnowledge('${item._id}')">Delete</button>
       </div>
     `;
@@ -450,10 +452,11 @@ function renderKnowledgeBase(data) {
   });
 }
 
-window.editKnowledge = function(id, q, a) {
+window.editKnowledge = function(id, q, a, kw) {
   editingKbId = id;
   document.getElementById('kbQuestion').value = q;
   document.getElementById('kbAnswer').value = a;
+  document.getElementById('kbKeywords').value = kw || '';
   
   const submitBtn = kbForm.querySelector('button[type="submit"]');
   submitBtn.innerText = 'Update Knowledge Base';
@@ -468,6 +471,7 @@ if (kbForm) {
     e.preventDefault();
     const question = document.getElementById('kbQuestion').value;
     const answer = document.getElementById('kbAnswer').value;
+    const keywords = document.getElementById('kbKeywords').value;
     
     try {
       let res;
@@ -475,19 +479,20 @@ if (kbForm) {
         res = await fetch(`/api/knowledge/${editingKbId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, answer })
+          body: JSON.stringify({ question, answer, keywords })
         });
       } else {
         res = await fetch('/api/knowledge', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, answer })
+          body: JSON.stringify({ question, answer, keywords })
         });
       }
       
       if (res.ok) {
         document.getElementById('kbQuestion').value = '';
         document.getElementById('kbAnswer').value = '';
+        document.getElementById('kbKeywords').value = '';
         editingKbId = null;
         
         const submitBtn = kbForm.querySelector('button[type="submit"]');
