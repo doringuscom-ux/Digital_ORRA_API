@@ -29,6 +29,18 @@ const sessionSchema = new mongoose.Schema({
   language: {
     type: String,
     default: null
+  },
+  flowStep: {
+    type: String,
+    default: 'start'
+  },
+  flowCompleted: {
+    type: Boolean,
+    default: false
+  },
+  flowData: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
   }
 }, { timestamps: true });
 
